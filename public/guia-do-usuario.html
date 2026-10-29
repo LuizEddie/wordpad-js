@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#185abd">
+  <title>Guia completo de uso · Wordpad</title>
+  <style>
+    :root{font-family:Arial,Helvetica,sans-serif;color:#202124;background:#f8f9fa;line-height:1.6}*{box-sizing:border-box}body{margin:0}.guide{max-width:900px;margin:0 auto;padding:32px 28px 64px;background:#fff;min-height:100vh}h1,h2,h3{color:#174ea6;line-height:1.25}h1{font-size:30px;margin:0 0 8px}h2{font-size:21px;border-bottom:1px solid #e4e8ee;padding-bottom:7px;margin-top:34px}h3{font-size:16px;margin-top:23px}p,li{font-size:15px}a{color:#185abc}nav{display:flex;flex-wrap:wrap;gap:8px;margin:22px 0 28px;padding:14px;background:#f1f5fb;border-radius:8px}nav a{font-size:13px;text-decoration:none;padding:5px 8px;border-radius:4px}nav a:hover{background:#dce8f8}code{background:#eef1f5;padding:2px 5px;border-radius:4px}ul,ol{padding-left:24px}li{margin:5px 0}.note{padding:12px 15px;border-left:3px solid #4285f4;background:#f4f8ff;border-radius:3px}.kbd{display:inline-block;border:1px solid #c8cdd4;border-bottom-width:2px;background:#fff;border-radius:4px;padding:1px 6px;font-size:12px}.muted{color:#5f6368}footer{margin-top:42px;padding-top:14px;border-top:1px solid #e4e8ee;color:#68717d;font-size:12px}@media(max-width:600px){.guide{padding:24px 18px 44px}h1{font-size:25px}nav{gap:4px}}
+  </style>
+</head>
+<body>
+<main class="guide">
+  <h1>Guia completo de uso do Wordpad JS</h1>
+  <p>O Wordpad JS é um editor de texto rico que funciona no navegador, salva documentos neste dispositivo e pode ser instalado como PWA. Este guia descreve os controles disponíveis na versão atual.</p>
+  <nav aria-label="Navegação do guia">
+    <a href="#tela">Conheça a tela</a><a href="#formatar">Texto</a><a href="#inserir">Inserir conteúdo</a><a href="#pagina">Páginas</a><a href="#salvar">Salvar e exportar</a><a href="#offline">Offline</a><a href="#privacidade">Privacidade</a><a href="#problemas">Problemas comuns</a>
+  </nav>
+
+  <section id="tela"><h2>1. Conheça a tela</h2>
+    <ul>
+      <li><strong>Nome do documento:</strong> edite o campo no topo. O nome é usado ao salvar localmente e nos arquivos exportados.</li>
+      <li><strong>Indicador de salvamento:</strong> mostra quando há alterações pendentes e quando o conteúdo foi gravado no armazenamento local.</li>
+      <li><strong>Salvar:</strong> abre o menu de exportação. O salvamento local acontece automaticamente enquanto você edita.</li>
+      <li><strong>Ajuda:</strong> abre este guia dentro do editor.</li>
+      <li><strong>Documentos recentes:</strong> painel lateral com documentos salvos neste navegador. Use <strong>Novo documento</strong> para começar outro.</li>
+      <li><strong>Área da folha:</strong> clique no papel e digite. O rodapé informa a página atual, o total de páginas e a contagem de caracteres.</li>
+      <li><strong>Guias:</strong> Página Inicial, Inserir e Layout organizam as ferramentas.</li>
+    </ul>
+  </section>
+
+  <section id="formatar"><h2>2. Escrever e formatar texto</h2>
+    <p>Clique na folha e digite. Para aplicar uma formatação a texto existente, selecione o trecho antes de usar o controle. Para definir a formatação do próximo texto, posicione o cursor no ponto desejado e escolha o controle.</p>
+    <p>Na guia <strong>Página Inicial</strong> você encontra:</p>
+    <ul>
+      <li><strong>Desfazer e refazer</strong> alterações recentes.</li>
+      <li><strong>Estilo de parágrafo:</strong> texto normal, Título 1 ou Título 2.</li>
+      <li><strong>Fonte e tamanho:</strong> escolha a família tipográfica e o tamanho em pontos.</li>
+      <li><strong>Negrito, itálico, sublinhado, tachado, sobrescrito e subscrito.</strong></li>
+      <li><strong>Cor da fonte:</strong> clique no ícone de letra para aplicar a cor atual; use a seta para abrir a paleta e escolher uma cor pronta ou personalizada.</li>
+      <li><strong>Realce:</strong> selecione uma cor para destacar o texto.</li>
+      <li><strong>Remover formatação</strong> da seleção.</li>
+      <li><strong>Alinhamento:</strong> esquerda, centro, direita ou justificado.</li>
+      <li><strong>Listas:</strong> marcadores e numeração. Posicione o cursor em um parágrafo ou selecione vários parágrafos antes de ativar o tipo desejado. Pressione Enter para continuar; em um item vazio, pressione Enter novamente para sair.</li>
+      <li><strong>Citação e bloco de código.</strong></li>
+    </ul>
+    <p>Os botões ativos ficam destacados quando o cursor está dentro de um trecho com aquela formatação.</p>
+  </section>
+
+  <section id="inserir"><h2>3. Inserir conteúdo</h2>
+    <p>Na guia <strong>Inserir</strong>, cada botão abre um menu de categoria com suas ações relacionadas.</p>
+    <h3>Imagem</h3>
+    <ol>
+      <li>Abra <strong>Imagem → Inserir do computador</strong> e escolha um arquivo de imagem.</li>
+      <li>Clique na imagem no documento para selecioná-la. Alças aparecem nos quatro lados e nos quatro cantos.</li>
+      <li>Arraste uma alça lateral para ajustar somente largura ou altura; arraste um canto para ajustar as duas dimensões.</li>
+      <li>No menu <strong>Imagem</strong>, ajuste a largura em pixels, o texto alternativo, o alinhamento e a quebra de texto.</li>
+      <li><strong>Texto à direita</strong> posiciona a imagem à esquerda e permite que o texto flua à direita. <strong>Texto à esquerda</strong> posiciona a imagem à direita. <strong>Sem quebra</strong> coloca o texto em blocos acima e abaixo da imagem.</li>
+      <li>Use <strong>Remover imagem</strong> para apagar a imagem selecionada.</li>
+    </ol>
+    <h3>Link</h3>
+    <p>Abra <strong>Link → Adicionar ou editar link</strong> com o cursor em um texto selecionado. Informe o endereço quando solicitado. Para retirar um link, selecione um trecho vinculado e escolha <strong>Remover link</strong>.</p>
+    <h3>Tabela</h3>
+    <ol>
+      <li>Abra <strong>Tabela</strong> e passe o mouse sobre a grade para escolher o número de linhas e colunas (até 8 × 8).</li>
+      <li>Clique na célula da grade que representa o tamanho desejado. A tabela é inserida com uma linha de cabeçalho.</li>
+      <li>Clique em uma célula para editá-la. Abra <strong>Tabela</strong> novamente para adicionar ou remover linha/coluna ou excluir a tabela.</li>
+      <li>Os comandos de edição ficam desabilitados quando o cursor não está dentro de uma tabela.</li>
+    </ol>
+    <h3>Mais e Arquivo</h3>
+    <ul>
+      <li><strong>Mais → Linha horizontal</strong> insere um separador no documento.</li>
+      <li><strong>Mais → Quebra de página</strong> começa uma página nova. <span class="kbd">Ctrl</span>+<span class="kbd">Enter</span> no Windows/Linux ou <span class="kbd">⌘</span>+<span class="kbd">Enter</span> no macOS insere a mesma quebra no cursor.</li>
+      <li><strong>Arquivo → Abrir documento</strong> importa um arquivo local.</li>
+    </ul>
+  </section>
+
+  <section id="pagina"><h2>4. Página, margens e paginação</h2>
+    <ul>
+      <li>Na guia <strong>Layout</strong>, escolha A4 (padrão), Carta, Ofício/Legal, A3 ou A5.</li>
+      <li>Arraste os marcadores azuis nas réguas para alterar as margens esquerda, direita, superior e inferior ou informe os valores em polegadas.</li>
+      <li>O editor acrescenta páginas e cria quebras automáticas conforme o texto alcança a área útil. Parágrafos longos podem ser divididos entre páginas.</li>
+      <li>O rodapé mostra <strong>Página atual de total</strong>.</li>
+      <li><strong>Visualizar / PDF</strong> abre a janela de impressão do navegador; selecione <strong>Salvar como PDF</strong> para criar um PDF.</li>
+    </ul>
+    <p class="note">O navegador pode paginar de maneira um pouco diferente do Word por diferenças de fontes, impressão e métricas de texto.</p>
+  </section>
+
+  <section id="salvar"><h2>5. Salvar, abrir e exportar</h2>
+    <h3>Salvamento local</h3>
+    <p>O editor salva automaticamente as alterações no armazenamento local do navegador após uma breve pausa. O indicador no topo mostra o estado. Até 30 documentos recentes ficam disponíveis no painel lateral, no mesmo perfil de navegador e dispositivo. O menu <strong>Salvar</strong> serve para exportar arquivos; não é necessário acioná-lo para gravar a cópia local.</p>
+    <h3>Abrir arquivos</h3>
+    <p>Em <strong>Inserir → Arquivo → Abrir documento</strong>, escolha <code>.docx</code>, <code>.txt</code>, <code>.md</code>, <code>.markdown</code>, <code>.html</code> ou <code>.htm</code>. O arquivo aberto substitui o conteúdo atual do editor; se precisar manter as duas versões, salve ou exporte o documento atual antes.</p>
+    <ul>
+      <li>DOCX é convertido para o modelo do editor. O importador preserva conteúdo e formatação comum, imagens, links, listas, tabelas e configurações de página compatíveis.</li>
+      <li>HTML é interpretado como estrutura de texto rico.</li>
+      <li>TXT e Markdown são carregados linha a linha como texto; a sintaxe Markdown não é renderizada automaticamente como formatação.</li>
+    </ul>
+    <h3>Exportar arquivos</h3>
+    <p>Abra <strong>Salvar</strong> no topo e escolha um formato:</p>
+    <ul>
+      <li><strong>Word (.docx):</strong> inclui texto, formatação comum, listas, tabelas, imagens, links, quebras e tamanho de página/margens.</li>
+      <li><strong>PDF / Imprimir:</strong> abre a caixa de impressão do navegador. Escolha <strong>Salvar como PDF</strong>.</li>
+      <li><strong>Texto (.txt):</strong> exporta texto sem formatação.</li>
+      <li><strong>HTML:</strong> exporta estrutura e formatação suportadas pelo editor.</li>
+      <li><strong>Markdown (.md):</strong> exporta conteúdo textual; não converte todas as marcas de formatação para sintaxe Markdown.</li>
+    </ul>
+    <p>DOCX não é uma cópia pixel a pixel. Comentários, controle de alterações, cabeçalhos/rodapés, objetos flutuantes, gráficos, equações, colunas, fontes incorporadas e alguns estilos avançados podem ser simplificados. Word e LibreOffice podem recalcular a paginação ao abrir o arquivo.</p>
+    <p>Não há suporte nativo para <code>.doc</code> legado, <code>.odt</code>, documentos proprietários do Google Docs ou arquivos protegidos por senha. Converta esses formatos para DOCX, HTML ou texto antes de importar.</p>
+  </section>
+
+  <section id="offline"><h2>6. Instalar e usar offline</h2>
+    <p>Abra a aplicação uma vez com conexão e aguarde o carregamento completo. Em um site publicado com HTTPS, use <strong>Instalar aplicativo</strong> no navegador ou <strong>Adicionar à tela inicial</strong> no celular. Depois que os arquivos da aplicação estiverem em cache, o PWA poderá iniciar offline.</p>
+    <p>A primeira visita offline não é possível antes de o aplicativo ser carregado e armazenado em cache. A abertura e exportação de arquivos dependem das opções e permissões oferecidas pelo navegador.</p>
+  </section>
+
+  <section id="privacidade"><h2>7. Privacidade e cópias de segurança</h2>
+    <p>O conteúdo fica no armazenamento local deste navegador; não há conta ou sincronização com servidor. Limpar dados do navegador, mudar de perfil ou usar outro dispositivo pode tornar os documentos recentes indisponíveis. Exporte cópias importantes pelo menu <strong>Salvar</strong> e guarde-as em local seguro.</p>
+  </section>
+
+  <section id="problemas"><h2>8. Solução de problemas</h2>
+    <ul>
+      <li><strong>Não encontro um comando:</strong> abra a guia correspondente e clique no menu de categoria. Imagem, Link, Tabela, Mais e Arquivo ficam em dropdowns da guia Inserir.</li>
+      <li><strong>Controles da imagem não aparecem:</strong> clique diretamente na imagem para selecioná-la e abra Inserir → Imagem.</li>
+      <li><strong>Não consigo alterar uma tabela:</strong> coloque o cursor em uma célula; os comandos ficam habilitados somente dentro dela.</li>
+      <li><strong>Alterações não aparecem em Documentos recentes:</strong> aguarde o indicador confirmar a gravação e confira se está no mesmo navegador/perfil.</li>
+      <li><strong>O DOCX mudou de aparência:</strong> confira tamanho de papel e margens. Recursos avançados e métricas de fontes podem variar entre editores.</li>
+      <li><strong>Não consigo salvar PDF:</strong> em Salvar → PDF / Imprimir, escolha a impressora Salvar como PDF na caixa de impressão.</li>
+      <li><strong>A aplicação não abre offline:</strong> conecte-se, abra a aplicação e aguarde o primeiro carregamento/cache. A instalação PWA requer HTTPS (exceto localhost durante desenvolvimento).</li>
+    </ul>
+  </section>
+
+  <section><h2>Atalhos conhecidos</h2><ul><li><span class="kbd">Ctrl</span>+<span class="kbd">Enter</span> no Windows/Linux ou <span class="kbd">⌘</span>+<span class="kbd">Enter</span> no macOS: inserir quebra de página.</li><li><span class="kbd">Ctrl</span>+<span class="kbd">Z</span> / <span class="kbd">⌘</span>+<span class="kbd">Z</span>: desfazer.</li><li><span class="kbd">Ctrl</span>+<span class="kbd">Y</span> ou <span class="kbd">Ctrl</span>+<span class="kbd">Shift</span>+<span class="kbd">Z</span> / <span class="kbd">⌘</span>+<span class="kbd">Shift</span>+<span class="kbd">Z</span>: refazer (pode variar conforme o navegador).</li></ul><p>Para recursos sem atalho listado, use os botões e menus do editor.</p></section>
+  <footer>Guia do Wordpad JS · Os documentos permanecem no armazenamento local deste navegador.</footer>
+</main>
+</body>
+</html>
