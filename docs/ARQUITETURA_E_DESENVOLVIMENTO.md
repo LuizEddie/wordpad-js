@@ -99,19 +99,23 @@ O manual dentro do app é um recurso estático de `public/guia-do-usuario.html`;
 
 TipTap cria o editor em `App` com `useEditor`. O StarterKit cobre os blocos e marks de base; as extensões adicionais habilitam sublinhado, alinhamento, estilos de texto/cor/fonte, realce, imagem, link, tabelas, subscrito e sobrescrito. Extensões locais acrescentam tamanho de fonte, atributos de layout de parágrafo/célula, continuação de paginação e o nó `pageBreak`.
 
-O estado React guarda metadados de interface/documento, por exemplo título, status de salvamento, papel, margens, menus abertos, guias e documento recente selecionado. O texto rico e a seleção pertencem ao estado TipTap/ProseMirror; as alterações devem usar comandos do editor em vez de alterar HTML diretamente no DOM.
+O estado React guarda metadados de interface/documento, por exemplo título, status de salvamento, papel, margens, menus abertos, guias e documento recente selecionado. O texto rico e a seleção pertencem ao estado TipTap/ProseMirror; as alterações devem usar comandos do editor em vez de alterar HTML diretamente no DOM. O handler de teclado captura Tab fora de tabelas para inserir o caractere de tabulação; CSS `white-space: pre-wrap` e `tab-size: 4` preservam sua exibição. Em células de tabela, o handler deixa a extensão de tabela controlar a navegação.
 
 ### 5.3 Persistência local
 
 `STORAGE_KEY` é `wordpad-documents-v1`. `readDocs()` lê a lista guardada no `localStorage`; `save()` grava título, conteúdo HTML, data de atualização, papel e margens. A edição altera o status e um efeito aplica debounce de 900 ms antes da persistência. O conjunto de documentos recentes é limitado a 30 entradas. Essa persistência é específica ao perfil/origem do navegador e pode ser removida pelas configurações do navegador.
 
-O botão de topo **Salvar** abre o menu de exportação. O salvamento local não depende desse menu. Há também controles simplificados na barra móvel; ao alterar essas ações, preserve a distinção entre salvar no armazenamento local e exportar arquivo.
+O botão de topo **Salvar** abre o menu de exportação. O salvamento local não depende desse menu. Na faixa inferior móvel há **Abrir**, **PDF** e **Inserir**; o acesso ao painel de documentos fica no botão hambúrguer da barra de contexto, que abre um drawer sobre a área do editor. A barra móvel não oferece um botão separado de salvar, pois a gravação local é automática.
 
 ### 5.4 Paginação e papel
 
 `PAPER_SIZES` define dimensões físicas em milímetros; o layout converte mm para CSS px usando 96 px por polegada. A folha visual usa a dimensão selecionada, as margens e o espaço visual entre páginas (`PAGE_GAP`). As réguas representam as margens e `adjustMargin()` atualiza os quatro valores em polegadas por interação de ponteiro.
 
-`paginateDocument()` mede os blocos renderizados pelo DOM e insere nós `pageBreak` automáticos quando a altura útil é excedida. Para parágrafos altos, `findTextSplitPosition()` examina caixas de glifos com `Range` e encontra posição de texto para dividir o parágrafo antes do limite da página. As quebras geradas automaticamente são removidas e recalculadas durante o reflow; alterações estruturais de paginação são marcadas fora do histórico do usuário. Quebras manuais têm `automatic: false` e devem permanecer distintas das automáticas.
+`paginateDocument()` mede os blocos renderizados pelo DOM e insere nós `pageBreak` automáticos quando a altura útil é excedida. Recebe largura e altura físicas da folha e as quatro margens em pixels para calcular a área imprimível. Imagens importadas, coladas ou redimensionadas são reduzidas proporcionalmente quando ultrapassam a largura útil ou a altura imprimível de uma página; a atualização de atributos é feita com `setNodeMarkup`, sem editar o DOM do editor, e agenda um reflow para recalcular as páginas. Quebras automáticas também limpam imagens flutuantes. Para parágrafos que não cabem no espaço restante, `findTextSplitPosition()` examina caixas de glifos com `Range` e retorna tanto a posição ProseMirror quanto o limite visual da linha. `pageBreakHeightToPage()` encontra a próxima folha pela coordenada física do bloco, considerando a altura dos separadores anteriores que ainda serão inseridos no mesmo lote. Esse deslocamento pendente é necessário porque as posições DOM são medidas antes da transação estrutural; sem compensá-lo, cada separador anterior aumenta artificialmente a altura calculada dos seguintes e empurra o texto para os vãos. Em listas, mede os elementos `<li>` e separa o nó de lista antes do primeiro item que ultrapassa o espaço; se o próprio parágrafo do item cruza o limite, divide o texto e cria um fragmento de continuação sem marcador repetido. Ajusta também o início de listas numeradas. Quando a lista precisa passar primeiro para uma página nova, insere uma quebra antes do fragmento inicial e outra antes da continuação, incluindo o deslocamento das duas ao calcular o destino. O reflow recalcula os fragmentos seguintes. Blocos e itens sem ponto de divisão válido começam na próxima página. As quebras geradas automaticamente são removidas e recalculadas durante o reflow; alterações estruturais de paginação são marcadas fora do histórico do usuário. Quebras manuais têm `automatic: false` e devem permanecer distintas das automáticas.
+
+A folha visual é desenhada com altura e largura correspondentes ao formato selecionado em `PAPER_SIZES` (milímetros convertidos para CSS px a 96 dpi). A imagem de fundo se repete no passo `altura + PAGE_GAP`. `pageStackHeight` reserva explicitamente `pageCount × passo − PAGE_GAP` no elemento da folha, garantindo que uma página recém-contada tenha espaço visual completo desde o primeiro render; a altura total cresce sem redimensionar as folhas individuais.
+
+Listas coladas do Word/Docs são nós TipTap `bulletList`/`orderedList` e passam pelo mesmo cálculo de geometria. A paginação tenta dividir entre itens e, quando um item contém um parágrafo comprido, divide o texto por posição ProseMirror e cria uma continuação sem repetir o marcador. O menu contextual mede sua caixa depois de renderizar e limita a posição aos limites do `visualViewport` (ou do viewport do documento); quando o conteúdo é maior que a tela, sua própria área rola.
 
 Essa paginação é uma aproximação visual no navegador: fontes, zoom, métricas de texto e impressão podem produzir paginação diferente no Word/LibreOffice. Qualquer mudança em CSS de editor, altura/margens, quebras ou reflow pode afetar essa lógica. Leia a skill `wordpad-pagination-and-rulers` antes de alterá-la.
 
@@ -148,15 +152,19 @@ O arquivo é extenso e atualmente reúne áreas distintas. Principais funções/
 | `readDocxPageSetup` | Lê dimensões de papel e margens de `word/document.xml`. |
 | `findTextSplitPosition` | Procura posição de divisão em um bloco de texto a partir do limite de página renderizado. |
 | `paginateDocument` | Insere/atualiza quebras automáticas e calcula páginas a partir da geometria DOM. |
-| `FontSize` / `PaginationContinuation` / `ParagraphLayout` / `TableAppearance` | Extensões TipTap que persistem atributos em nós e marks. |
+| `FontSize` / `PaginationContinuation` / `ListItemPaginationContinuation` / `ParagraphLayout` / `TableAppearance` | Extensões TipTap que persistem atributos em nós e marks. A continuação de item de lista suprime marcador repetido entre páginas. |
 | `PageBreak` | Nó de bloco atômico usado para quebras manuais/automáticas e espaço entre folhas. |
 | `EditableImageView` | Node view da imagem selecionada, com oito alças de resize controladas pelo mouse/pointer. |
 | `compressImage` | Redimensiona/comprime imagens locais para reduzir o peso armazenado no documento. |
 | `save` | Salva o documento atual e metadados no armazenamento local. |
+| `deleteSavedDocument` | Confirma a exclusão e remove o documento da chave `wordpad-documents-v1`, atualizando o painel de recentes. |
 | `newDocument` / `openFile` | Inicia um documento ou importa arquivo local para a instância do editor. |
 | `insertImage` / `addLink` / `insertTable` | Comandos de inserção de conteúdo rico. |
 | `adjustMargin` | Converte movimento nas réguas em atualizações limitadas de margem. |
 | `toggleInsertMenu` / `popupPosition` | Controla menus de categoria e posicionamento dos popovers. |
+| `openEditorContextMenu` / `ContextItem` | Preserva a seleção ou posiciona o cursor sob o clique direito e apresenta comandos contextuais do editor. |
+| `copyFromEditor` / `pasteIntoEditor` | Integra recortar/copiar/colar com a Clipboard API e fallback de `execCommand` para cópia/corte. A leitura de texto para colar depende das permissões do navegador. |
+| `closeMobileSidebarOnOutside` | Fecha o drawer móvel em pointerdown fora do painel e do botão de alternância. |
 | `exportDocx` / `exportPdf` / `exportText` / `exportHtml` / `exportMarkdown` | Exportações locais. |
 | `toolbar` / `insertTools` | Grupos de controles das guias Página Inicial e Inserir. |
 

@@ -14,6 +14,8 @@
 
 /* Tailwind preflight removes list markers; restore editable rich-text lists. */
 .document-editor ul,.document-editor ol{padding-inline-start:30px;margin:0 0 1em;list-style-position:outside}.document-editor ul{list-style-type:disc}.document-editor ol{list-style-type:decimal}.document-editor li{display:list-item;padding-inline-start:2px;margin:0 0 .3em}.document-editor li>p{margin:0 0 .35em}.document-editor li::marker{color:#5f6368}.document-editor ul ul{list-style-type:circle}.document-editor ul ul ul{list-style-type:square}.document-editor ol ol{list-style-type:lower-alpha}.document-editor ol ol ol{list-style-type:lower-roman}
+.document-editor .page-break{clear:both}
+.recent-row{display:flex;align-items:center;gap:2px;min-width:0}.recent-row>.recent{flex:1;min-width:0}.recent-delete{width:30px;height:30px;flex:none;display:grid;place-items:center;border:0;border-radius:5px;background:transparent;color:#77818d;cursor:pointer}.recent-delete:hover,.recent-delete:focus-visible{background:#fcebea;color:#b3261e;outline:none}.recent-delete:focus-visible{box-shadow:0 0 0 2px #efb6b1}
 .vertical-ruler{border-top:1px solid #c7cdd4}.vertical-ruler::before{content:"";position:absolute;z-index:4;top:-1px;left:-1px;right:-1px;height:1px;background:#c7cdd4;pointer-events:none}
 
 /* Match both ruler tracks in thickness, surface, ticks, and number labels. */
@@ -24,3 +26,24 @@
 .insert-tools{overflow-y:visible}.insert-dropdown{position:relative;display:flex;align-items:center;flex-shrink:0}.insert-dropdown-trigger{white-space:nowrap}.insert-dropdown-trigger svg:last-child{margin-left:1px;color:#687482}.insert-menu{position:fixed;z-index:40;width:285px;max-width:calc(100vw - 16px);max-height:calc(100vh - 180px);overflow:auto;background:#fff;border:1px solid #d8dde4;border-radius:8px;box-shadow:0 8px 24px #20212430;padding:12px;color:#39424e}.image-insert-menu{width:340px}.compact-insert-menu{width:225px}.table-insert-menu{width:285px}.insert-menu>strong{display:block;font-size:13px;font-weight:600;margin:0 0 10px}.insert-menu>small{display:block;color:#687482;text-align:center;font-size:10px;margin:6px 0 10px}.insert-menu-hint{font-size:12px;color:#687482;line-height:1.45;margin:10px 0 2px}.insert-menu-action{height:34px;width:100%;display:flex;align-items:center;gap:9px;padding:0 9px;border:0;border-radius:5px;background:#fff;color:#435064;text-align:left;font:inherit;font-size:12px;cursor:pointer}.insert-menu-action:hover:not(:disabled){background:#eef4fc;color:#185abd}.insert-menu-action:disabled{opacity:.45;cursor:not-allowed}.insert-menu-action.danger{color:#b3261e}.insert-menu-section{border-top:1px solid #e6e9ed;margin-top:9px;padding-top:9px}.insert-menu-section>span{display:block;font-size:10px;font-weight:600;color:#717c88;text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px}.insert-menu .image-edit-tools{display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:end}.insert-menu .image-edit-tools label{display:flex;flex-direction:column;align-items:flex-start;gap:4px}.insert-menu .image-edit-tools input{width:100%}.insert-menu .image-edit-tools label span{display:none}.insert-menu .insert-menu-button-row{display:flex;flex-wrap:wrap;gap:4px}.insert-menu .insert-menu-button-row .insert-action{font-size:10px;padding:0 7px;white-space:nowrap}.insert-menu .table-grid-picker{grid-template-columns:repeat(8,20px);gap:3px;margin:0 auto 7px}.insert-menu .table-grid-picker button{width:20px;height:20px}.table-menu-actions{display:grid!important;grid-template-columns:1fr 1fr}.table-menu-actions .insert-action{justify-content:flex-start}
 @media(max-width:560px){.insert-menu{max-height:calc(100vh - 155px)}.image-insert-menu{width:min(340px,calc(100vw - 16px))}.compact-insert-menu{width:min(225px,calc(100vw - 16px))}.table-insert-menu{width:min(285px,calc(100vw - 16px))}}
 .help-button{gap:6px;white-space:nowrap}.help-overlay{position:fixed;inset:0;z-index:100;background:#20212488;display:flex;align-items:center;justify-content:center;padding:20px}.help-dialog{width:min(1040px,96vw);height:min(900px,94vh);display:flex;flex-direction:column;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 18px 60px #0005}.help-dialog-header{height:48px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:0 14px 0 18px;border-bottom:1px solid #e1e5ea;color:#344054}.help-dialog-header strong{display:flex;align-items:center;gap:8px;font-size:14px}.help-dialog iframe{border:0;flex:1;width:100%;min-height:0;background:#fff}@media(max-width:560px){.help-overlay{padding:0}.help-dialog{width:100vw;height:100dvh;max-height:100dvh;border-radius:0}.help-button{font-size:0;padding:0 9px}.help-button svg{width:18px;height:18px}}
+
+/* Preserve tab characters entered in the editor; four columns match common word processors. */
+.document-editor{white-space:pre-wrap;tab-size:4}
+.document-editor>*{max-width:100%}
+@media(max-width:560px){
+  main{position:relative;overflow:hidden}
+  main>aside{display:flex;position:absolute;inset:0 auto 0 0;width:min(270px,85vw);z-index:20;background:#f8f9fb;box-shadow:8px 0 22px #152b4826}
+  main>aside.closed{display:none}
+}
+.context-menu{position:fixed;z-index:90;width:270px;max-width:calc(100vw - 16px);max-height:calc(100dvh - 16px);overflow:auto;padding:7px;background:#fff;border:1px solid #d9dee7;border-radius:9px;box-shadow:0 8px 26px #1b2d4733;color:#303843;font-size:13px}
+.context-menu{overscroll-behavior:contain;scrollbar-gutter:stable}
+.context-menu-item{width:100%;min-height:34px;display:flex;align-items:center;gap:10px;padding:6px 10px;border:0;border-radius:5px;background:transparent;color:inherit;text-align:left;font:inherit;cursor:pointer}
+.context-menu-item svg{width:16px;height:16px;flex:none;color:#687482}
+.context-menu-item span{flex:1}
+.context-menu-item:hover:not(:disabled),.context-menu-item:focus-visible{background:#eef4fc;color:#174ea6;outline:none}
+.context-menu-item.active{background:#e8f0fe;color:#174ea6}
+.context-menu-item:disabled{opacity:.42;cursor:default}
+.context-menu-separator{height:1px;margin:5px 4px;background:#e6e9ef}
+.context-color-row{height:34px;display:flex;align-items:center;justify-content:space-between;padding:0 10px;color:#404854;font-size:12px}
+.context-color-row input{width:31px;height:25px;padding:1px;border:1px solid #d6dce4;border-radius:4px;background:#fff;cursor:pointer}
+.document-editor li[data-pagination-continuation]::marker{content:""}

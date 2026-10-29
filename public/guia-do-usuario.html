@@ -23,7 +23,8 @@
       <li><strong>Indicador de salvamento:</strong> mostra quando há alterações pendentes e quando o conteúdo foi gravado no armazenamento local.</li>
       <li><strong>Salvar:</strong> abre o menu de exportação. O salvamento local acontece automaticamente enquanto você edita.</li>
       <li><strong>Ajuda:</strong> abre este guia dentro do editor.</li>
-      <li><strong>Documentos recentes:</strong> painel lateral com documentos salvos neste navegador. Use <strong>Novo documento</strong> para começar outro.</li>
+      <li><strong>Documentos recentes:</strong> painel lateral com documentos salvos neste navegador. Use <strong>Novo documento</strong> para começar outro ou o botão de lixeira ao lado de um item para excluí-lo do armazenamento local após confirmar.</li>
+      <li><strong>Menu ☰:</strong> no celular, abre ou fecha o painel de documentos recentes. Toque fora do painel para fechá-lo. A barra inferior contém Abrir, PDF e Inserir; as edições continuam sendo salvas automaticamente.</li>
       <li><strong>Área da folha:</strong> clique no papel e digite. O rodapé informa a página atual, o total de páginas e a contagem de caracteres.</li>
       <li><strong>Guias:</strong> Página Inicial, Inserir e Layout organizam as ferramentas.</li>
     </ul>
@@ -45,6 +46,8 @@
       <li><strong>Citação e bloco de código.</strong></li>
     </ul>
     <p>Os botões ativos ficam destacados quando o cursor está dentro de um trecho com aquela formatação.</p>
+    <p>No editor, pressione <strong>Tab</strong> para inserir uma tabulação de quatro espaços. Dentro de uma tabela, Tab mantém a navegação entre células. <strong>Shift+Tab</strong> mantém o comportamento padrão do navegador/editor.</p>
+    <p>Clique com o botão direito dentro da folha para abrir o menu contextual. Ele se posiciona dentro da área visível; em telas menores, role dentro do próprio menu para acessar todas as opções. Ele reúne desfazer/refazer, recortar/copiar/colar, selecionar tudo, formatação de texto, estilo de parágrafo, listas, alinhamento, links, inserção de imagem/tabela e quebra de página. <strong>Colar</strong> depende da permissão de área de transferência do navegador; se for bloqueado, use <code>Ctrl+V</code> ou <code>⌘+V</code>. O menu oferece os comandos disponíveis no Wordpad; recursos dependentes de conta ou colaboração do Google Docs, como comentários compartilhados, não fazem parte do editor offline.</p>
   </section>
 
   <section id="inserir"><h2>3. Inserir conteúdo</h2>
@@ -80,6 +83,9 @@
       <li>Na guia <strong>Layout</strong>, escolha A4 (padrão), Carta, Ofício/Legal, A3 ou A5.</li>
       <li>Arraste os marcadores azuis nas réguas para alterar as margens esquerda, direita, superior e inferior ou informe os valores em polegadas.</li>
       <li>O editor acrescenta páginas e cria quebras automáticas conforme o texto alcança a área útil. Parágrafos longos podem ser divididos entre páginas.</li>
+      <li>Listas também continuam na página seguinte apenas a partir do item ou trecho que exceder o espaço disponível; o marcador não é repetido no meio de um item continuado.</li>
+      <li>Imagens maiores que a área útil são reduzidas proporcionalmente para caber na folha. Se a imagem couber na página, mas não no espaço restante, ela começa na página seguinte; o conteúdo não deve ocupar o vão cinza entre folhas.</li>
+      <li>Cada folha mantém o tamanho escolhido em <strong>Papel</strong> (A4, Carta, Ofício/Legal, A3 ou A5). Páginas novas usam as mesmas dimensões sem redimensionar as anteriores.</li>
       <li>O rodapé mostra <strong>Página atual de total</strong>.</li>
       <li><strong>Visualizar / PDF</strong> abre a janela de impressão do navegador; selecione <strong>Salvar como PDF</strong> para criar um PDF.</li>
     </ul>
@@ -88,7 +94,7 @@
 
   <section id="salvar"><h2>5. Salvar, abrir e exportar</h2>
     <h3>Salvamento local</h3>
-    <p>O editor salva automaticamente as alterações no armazenamento local do navegador após uma breve pausa. O indicador no topo mostra o estado. Até 30 documentos recentes ficam disponíveis no painel lateral, no mesmo perfil de navegador e dispositivo. O menu <strong>Salvar</strong> serve para exportar arquivos; não é necessário acioná-lo para gravar a cópia local.</p>
+    <p>O editor salva automaticamente as alterações no armazenamento local do navegador após uma breve pausa. O indicador no topo mostra o estado. Até 30 documentos recentes ficam disponíveis no painel lateral, no mesmo perfil de navegador e dispositivo. Para excluir um documento, clique na lixeira ao lado dele e confirme. Se ele estiver aberto, a edição atual permanece na tela, mas alterações futuras podem salvá-lo novamente. O menu <strong>Salvar</strong> serve para exportar arquivos; não é necessário acioná-lo para gravar a cópia local.</p>
     <h3>Abrir arquivos</h3>
     <p>Em <strong>Inserir → Arquivo → Abrir documento</strong>, escolha <code>.docx</code>, <code>.txt</code>, <code>.md</code>, <code>.markdown</code>, <code>.html</code> ou <code>.htm</code>. O arquivo aberto substitui o conteúdo atual do editor; se precisar manter as duas versões, salve ou exporte o documento atual antes.</p>
     <ul>

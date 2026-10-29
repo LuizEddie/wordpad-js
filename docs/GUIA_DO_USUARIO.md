@@ -8,7 +8,8 @@ O Wordpad JS é um editor de texto rico que funciona no navegador, salva documen
 - **Indicador de salvamento:** mostra quando há alterações pendentes e quando o conteúdo foi gravado no armazenamento local.
 - **Salvar:** abre o menu de exportação. O salvamento local acontece automaticamente enquanto você edita.
 - **Ajuda:** abre este guia dentro do editor.
-- **Documentos recentes:** painel lateral com documentos salvos neste navegador. Use **Novo documento** para começar outro.
+- **Documentos recentes:** painel lateral com documentos salvos neste navegador. Use **Novo documento** para começar outro ou o botão de lixeira ao lado de um item para excluí-lo do armazenamento local após confirmar.
+- **Menu ☰:** no celular, abre ou fecha o painel de documentos recentes. Toque fora do painel para fechá-lo. A barra inferior contém Abrir, PDF e Inserir; as edições continuam sendo salvas automaticamente.
 - **Área da folha:** clique no papel e digite. O rodapé informa a página atual, o total de páginas e a contagem de caracteres.
 - **Guias:** Página Inicial, Inserir e Layout organizam as ferramentas.
 
@@ -30,6 +31,10 @@ Na guia **Página Inicial** você encontra:
 - **Citação e bloco de código.**
 
 Os botões ativos ficam destacados quando o cursor está dentro de um trecho com aquela formatação.
+
+No editor, pressione **Tab** para inserir uma tabulação de quatro espaços. Dentro de uma tabela, Tab mantém a navegação entre células. `Shift+Tab` mantém o comportamento padrão do navegador/editor.
+
+Clique com o botão direito dentro da folha para abrir o menu contextual. Ele se posiciona dentro da área visível; em telas menores, role dentro do próprio menu para acessar todas as opções. Ele reúne desfazer/refazer, recortar/copiar/colar, selecionar tudo, formatação de texto, estilo de parágrafo, listas, alinhamento, links, inserção de imagem/tabela e quebra de página. **Colar** depende da permissão de área de transferência do navegador; se for bloqueado, use `Ctrl+V` ou `⌘+V`. O menu oferece os comandos disponíveis no Wordpad; recursos dependentes de conta ou colaboração do Google Docs, como comentários compartilhados, não fazem parte do editor offline.
 
 ## 3. Inserir conteúdo
 
@@ -69,6 +74,9 @@ Na guia **Layout**:
 - Arraste os marcadores azuis nas réguas para alterar as margens esquerda, direita, superior e inferior.
 - Você também pode digitar as margens em polegadas nos campos correspondentes.
 - O editor acrescenta páginas e cria quebras automáticas conforme o texto alcança a área útil. Parágrafos longos podem ser divididos entre páginas.
+- Listas também continuam na página seguinte apenas a partir do item ou trecho que exceder o espaço disponível; o marcador não é repetido no meio de um item continuado.
+- Imagens maiores que a área útil são reduzidas proporcionalmente para caber na folha. Uma imagem que cabe na página, mas não no espaço restante, começa na próxima página; o conteúdo não deve ocupar o vão cinza entre folhas.
+- Cada folha mantém o tamanho escolhido em **Papel** (A4, Carta, Ofício/Legal, A3 ou A5). O editor adiciona páginas com as mesmas dimensões, sem alterar o tamanho das páginas anteriores.
 - O rodapé mostra **Página atual de total**.
 - **Visualizar / PDF** abre a janela de impressão do navegador; selecione **Salvar como PDF** para criar um PDF.
 
@@ -78,7 +86,7 @@ O navegador pode paginar de maneira um pouco diferente do Word por diferenças d
 
 ### Salvamento local
 
-O editor salva automaticamente as alterações no armazenamento local do navegador após uma breve pausa. O indicador no topo mostra o estado. Até 30 documentos recentes ficam disponíveis no painel lateral, no mesmo perfil de navegador e dispositivo. O menu **Salvar** serve para exportar arquivos; não é necessário acioná-lo para gravar a cópia local.
+O editor salva automaticamente as alterações no armazenamento local do navegador após uma breve pausa. O indicador no topo mostra o estado. Até 30 documentos recentes ficam disponíveis no painel lateral, no mesmo perfil de navegador e dispositivo. Para excluir um documento, clique na lixeira ao lado dele e confirme. Se ele estiver aberto, a edição atual permanece na tela, mas alterações futuras podem salvá-lo novamente. O menu **Salvar** serve para exportar arquivos; não é necessário acioná-lo para gravar a cópia local.
 
 ### Abrir arquivos
 

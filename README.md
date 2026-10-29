@@ -9,6 +9,7 @@ Editor de documentos em React, TypeScript e Tailwind CSS, inspirado na faixa de 
 - Inserção de imagens locais, links, tabelas editáveis e linhas horizontais. Imagens selecionadas podem ser redimensionadas pelo mouse em qualquer lado ou canto, alinhadas, configuradas para permitir texto ao lado e ter o texto alternativo editado. O seletor de tabela permite escolher linhas e colunas antes de inserir; na guia Inserir, acrescente ou remova linhas e colunas.
 - Paginação automática por altura útil da folha e quebras de página manuais com `Ctrl+Enter`; o editor mostra as páginas e permite escolher o papel em Layout.
 - Efeitos de hover, foco e estado ativo na faixa de ferramentas e botões.
+- Menu contextual no botão direito com comandos de edição, formatação, alinhamento, listas, links e inserções disponíveis no editor.
 - Salvamento automático e manual no `localStorage`; lista de até 30 documentos recentes por navegador.
 - Importação de `.docx`, `.txt`, `.md`, `.html` e `.htm`.
 - Exportação para `.docx`, `.txt`, `.md` e `.html`; impressão ou opção “Salvar como PDF” do navegador.
