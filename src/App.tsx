@@ -51,7 +51,48 @@ const DOCX_STYLE_MAP = [
 const PAGE_GAP = 24
 const FONT_COLORS = ['#202124', '#5f6368', '#d93025', '#ea4335', '#f29900', '#fbbc04', '#188038', '#34a853', '#007b83', '#12a5a5', '#1a73e8', '#4285f4', '#174ea6', '#673ab7', '#a142f4', '#c5221f']
 const readDocs = (): SavedDoc[] => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]') as SavedDoc[] } catch { return [] } }
+function normalizeDocxColor(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+
+  const color = value.trim()
+
+  // Hexadecimal: #RGB ou #RRGGBB
+  const hex = color.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i)
+
+  if (hex) {
+    const digits = hex[1]
+
+    return digits.length === 3
+      ? digits.split('').map(char => char + char).join('').toUpperCase()
+      : digits.toUpperCase()
+  }
+
+  // RGB/RGBA: rgb(0, 0, 0), rgba(0, 0, 0, 1)
+  const rgb = color.match(
+    /^rgba?\(\s*([\d.]+%?)\s*,\s*([\d.]+%?)\s*,\s*([\d.]+%?)(?:\s*,\s*[\d.]+%?)?\s*\)$/i,
+  )
+
+  if (rgb) {
+    const channels = rgb.slice(1, 4).map(channel => {
+      const n = Number.parseFloat(channel)
+
+      if (!Number.isFinite(n)) return 0
+
+      return Math.round(
+        Math.min(255, Math.max(0, channel.endsWith('%') ? n * 2.55 : n)),
+      )
+    })
+
+    return channels
+      .map(channel => channel.toString(16).padStart(2, '0'))
+      .join('')
+      .toUpperCase()
+  }
+
+  return undefined
+}
 const escapeHtml = (value: string) => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+
 type EditorNode = { type?: string; text?: string; attrs?: Record<string, unknown>; marks?: { type: string; attrs?: Record<string, unknown> }[]; content?: EditorNode[] }
 async function prepareDocxImages(nodes: EditorNode[]): Promise<EditorNode[]> {
   return Promise.all(nodes.map(async node => {
@@ -87,9 +128,10 @@ function inlineRuns(nodes: EditorNode[] = []): ParagraphChild[] {
     const marks = node.marks || []
     const mark = (type: string) => marks.find(item => item.type === type)
     const style = mark('textStyle')?.attrs || {}
-    const color = String(style.color || '').replace('#', '').toUpperCase()
-    const highlight = mark('highlight')?.attrs?.color
-    const highlightHex = typeof highlight === 'string' ? highlight.replace('#', '').toUpperCase() : undefined
+    const color = normalizeDocxColor(style.color) || '202124'
+    const highlightHex = normalizeDocxColor(
+      mark('highlight')?.attrs?.color,
+    )
     const pt = Number.parseFloat(String(style.fontSize || ''))
     // Word's built-in Heading 1 style is blue by default. Write the editor's
     // dark text color explicitly when no color mark exists so DOCX theme styles
@@ -110,7 +152,7 @@ function docxBlocks(node: EditorNode, list?: 'bullet' | 'number'): (Paragraph | 
     const rows = content.map(row => {
       const cells = (row.content || []).map(cell => new DocxTableCell({
         children: (cell.content || []).map(paragraph => new Paragraph({ children: inlineRuns(paragraph.content), spacing: { after: 160, line: 396, lineRule: LineRuleType.AUTO } })),
-        shading: cell.type === 'tableHeader' ? { fill: 'E8EFF8' } : (typeof cell.attrs?.docxCellStyle === 'string' ? { fill: cell.attrs.docxCellStyle.replace('#', '').toUpperCase() } : undefined),
+        shading: cell.type === 'tableHeader' ? { fill: 'E8EFF8' } : (typeof cell.attrs?.docxCellStyle === 'string' ? { fill: normalizeDocxColor(cell.attrs.docxCellStyle) } : undefined),
         margins: { top: 90, bottom: 90, left: 110, right: 110 },
         borders: Object.fromEntries(['top', 'bottom', 'left', 'right'].map(edge => [edge, { style: BorderStyle.SINGLE, size: 4, color: '9AA6B5' }])) as never,
       }))
@@ -281,31 +323,129 @@ function paginateDocument(editor: Editor, pageHeight: number, pageWidth: number,
       const marginBottom = Number.parseFloat(style.marginBottom) || 0
       const pendingShift = pendingShiftBefore(pos)
       const listTop = dom.getBoundingClientRect().top
-      const listItems = Array.from(dom.children).filter((item): item is HTMLElement => item instanceof HTMLElement && item.tagName === 'LI')
+
+      const listItems = Array.from(dom.children).filter(
+        (item): item is HTMLElement =>
+          item instanceof HTMLElement && item.tagName === 'LI',
+      )
+
+      // Mantém o índice da página para calcular a quebra física do documento.
       const listTopAfterPendingBreaks = listTop + pendingShift
-      const pageIndex = Math.max(0, Math.floor((listTopAfterPendingBreaks - articleTop - topMargin) / pitch))
+      const pageIndex = Math.max(
+        0,
+        Math.floor(
+          (listTopAfterPendingBreaks - articleTop - topMargin) / pitch,
+        ),
+      )
+
       const pageTop = articleTop + pageIndex * pitch
       const pageContentTop = pageTop + topMargin
       const pageContentBottom = pageTop + pageHeight - bottomMargin
+
       const findListSplitAt = (limitY: number) => {
         for (let itemIndex = 0; itemIndex < node.childCount; itemIndex++) {
           const itemDom = listItems[itemIndex]
-          if (itemDom && itemDom.getBoundingClientRect().bottom > limitY) return itemIndex
+
+          if (
+            itemDom &&
+            itemDom.getBoundingClientRect().bottom > limitY
+          ) {
+            return itemIndex
+          }
         }
+
         return -1
       }
-      let cutoffY = pageContentBottom - pendingShift
+
+      // Calcula o limite com base no espaço restante da página,
+      // seguindo a mesma abordagem já usada para os parágrafos.
+      const remaining = Math.max(0, usable - usedBeforeBlock)
+
+      let cutoffY =
+        listTop -
+        marginTop +
+        remaining -
+        marginBottom -
+        pendingShift
+
       let splitAt = findListSplitAt(cutoffY)
-      // If no list item fits in the current remainder, first evaluate the list
-      // at the next page's real printable bottom. This avoids using the list's
-      // full height as a reason to move every item when some can still remain
-      // on the current page.
-      const listStartsNewPage = splitAt === 0 && listTopAfterPendingBreaks > pageContentTop + 2
+
+      // Se o primeiro item não couber no espaço restante, a lista precisa
+      // começar na próxima página. Tente levar também o título anterior.
+      const listStartsNewPage =
+        splitAt === 0 && usedBeforeBlock > 0
+
       let startBreakHeight = 0
+      let startBreakPos = pos
+
       if (listStartsNewPage) {
-        startBreakHeight = pageBreakHeightToPage(articleTop, pitch, topMargin, listTop, marginTop, 0, pendingShift)
-        const nextPageBottom = articleTop + (pageIndex + 1) * pitch + pageHeight - bottomMargin
-        cutoffY = nextPageBottom - pendingShift - startBreakHeight
+        const previousNode = pos > 0
+          ? state.doc.resolve(pos).nodeBefore
+          : null
+
+        const previousPos = previousNode
+          ? pos - previousNode.nodeSize
+          : -1
+
+        const previousDom = index > 0
+          ? editor.view.dom.children[index - 1]
+          : null
+
+        // Mantém o título junto da lista quando ambos são blocos
+        // consecutivos no documento.
+        const previousIsHeading =
+          previousNode?.type.name === 'heading' &&
+          previousDom instanceof HTMLElement
+
+        const breakNode = previousIsHeading
+          ? previousNode
+          : null
+
+        const breakDom = previousIsHeading
+          ? previousDom as HTMLElement
+          : null
+
+        if (breakNode && breakDom && previousPos >= 0) {
+          startBreakPos = previousPos
+
+          const headingStyle = getComputedStyle(breakDom)
+          const headingMarginTop =
+            Number.parseFloat(headingStyle.marginTop) || 0
+
+          startBreakHeight = pageBreakHeightToPage(
+            articleTop,
+            pitch,
+            topMargin,
+            breakDom.getBoundingClientRect().top,
+            headingMarginTop,
+            0,
+            pendingShiftBefore(startBreakPos),
+          )
+        } else {
+          // Sem título imediatamente anterior, mantém o comportamento
+          // normal: a quebra fica antes da lista.
+          startBreakHeight = pageBreakHeightToPage(
+            articleTop,
+            pitch,
+            topMargin,
+            listTop,
+            marginTop,
+            0,
+            pendingShiftBefore(pos),
+          )
+        }
+
+        const nextPageBottom =
+          articleTop +
+          (pageIndex + 1) * pitch +
+          pageHeight -
+          bottomMargin
+
+        cutoffY =
+          nextPageBottom -
+          pendingShift -
+          startBreakHeight
+
         splitAt = findListSplitAt(cutoffY)
       }
       if (splitAt >= 0) {
@@ -350,7 +490,12 @@ function paginateDocument(editor: Editor, pageHeight: number, pageWidth: number,
         const itemMarginTop = firstContinuationItem ? Number.parseFloat(getComputedStyle(firstContinuationItem).marginTop) || 0 : 0
         const splitHeight = firstContinuationItem ? pageBreakHeightToPage(articleTop, pitch, topMargin, firstContinuationItem.getBoundingClientRect().top, listMarginTop + itemMarginTop, listStartsNewPage ? 1 : 0, pendingShift + startBreakHeight) : Math.max(PAGE_GAP, pitch - usable)
         listSplits.push({ pos: splitPos, splitHeight, nextStart: node.type.name === 'orderedList' ? Number(node.attrs.start || 1) + splitAt : undefined })
-        if (listStartsNewPage) insertions.push({ pos, height: startBreakHeight })
+        if (listStartsNewPage) {
+          insertions.push({
+            pos: startBreakPos,
+            height: startBreakHeight,
+          })
+        }
         pages += listStartsNewPage ? 2 : 1
         used = 0
         requiresReflow = true
