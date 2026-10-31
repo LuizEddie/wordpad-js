@@ -317,7 +317,7 @@ function paginateDocument(editor: Editor, pageHeight: number, pageWidth: number,
         return
       }
     }
-    if ((node.type.name === 'bulletList' || node.type.name === 'orderedList') && overflowsPage && dom instanceof HTMLElement) {
+    if ((node.type.name === 'bulletList' || node.type.name === 'orderedList') && dom instanceof HTMLElement) {
       const style = getComputedStyle(dom)
       const marginTop = Number.parseFloat(style.marginTop) || 0
       const marginBottom = Number.parseFloat(style.marginBottom) || 0
@@ -357,26 +357,24 @@ function paginateDocument(editor: Editor, pageHeight: number, pageWidth: number,
         return -1
       }
 
-      // Calcula o limite com base no espaço restante da página,
-      // seguindo a mesma abordagem já usada para os parágrafos.
-      const remaining = Math.max(0, usable - usedBeforeBlock)
-
-      let cutoffY =
-        listTop -
-        marginTop +
-        remaining -
-        marginBottom -
-        pendingShift
+      // Usa o limite físico da página em que a lista realmente está. A soma
+      // lógica de alturas (`used`) inclui margens que o CSS colapsa entre
+      // blocos consecutivos; em documentos com muitos títulos/parágrafos ela
+      // superestima o espaço consumido e fazia a lista inteira mudar de página
+      // mesmo quando vários itens ainda cabiam. A posição DOM já reflete o
+      // layout real, inclusive as margens colapsadas.
+      let cutoffY = pageContentBottom - marginBottom - pendingShift
 
       let splitAt = findListSplitAt(cutoffY)
 
       // Se o primeiro item não couber no espaço restante, a lista precisa
       // começar na próxima página. Tente levar também o título anterior.
       const listStartsNewPage =
-        splitAt === 0 && usedBeforeBlock > 0
+        splitAt === 0 && listTopAfterPendingBreaks > pageContentTop + 2
 
       let startBreakHeight = 0
       let startBreakPos = pos
+      let startBreakConsumedHeight = 0
 
       if (listStartsNewPage) {
         const previousNode = pos > 0
@@ -411,6 +409,10 @@ function paginateDocument(editor: Editor, pageHeight: number, pageWidth: number,
           const headingStyle = getComputedStyle(breakDom)
           const headingMarginTop =
             Number.parseFloat(headingStyle.marginTop) || 0
+
+          startBreakConsumedHeight =
+            breakDom.getBoundingClientRect().height +
+            (Number.parseFloat(headingStyle.marginBottom) || 0)
 
           startBreakHeight = pageBreakHeightToPage(
             articleTop,
@@ -448,7 +450,7 @@ function paginateDocument(editor: Editor, pageHeight: number, pageWidth: number,
 
         splitAt = findListSplitAt(cutoffY)
       }
-      if (splitAt >= 0) {
+      if (splitAt >= 0 && splitAt < node.childCount) {
         const itemDom = listItems[splitAt]
         const itemNode = node.child(splitAt)
         let itemPos = pos + 1
@@ -482,7 +484,7 @@ function paginateDocument(editor: Editor, pageHeight: number, pageWidth: number,
       // Split the list between items so entries that fit remain on the current
       // sheet. If the list itself must first move to a fresh sheet, account for
       // that break as well, then let a reflow paginate the remaining items.
-      if (splitAt > 0) {
+      if (splitAt > 0 && splitAt < node.childCount) {
         let splitPos = pos + 1
         for (let itemIndex = 0; itemIndex < splitAt; itemIndex++) splitPos += node.child(itemIndex).nodeSize
         const firstContinuationItem = listItems[splitAt]
@@ -499,6 +501,32 @@ function paginateDocument(editor: Editor, pageHeight: number, pageWidth: number,
         pages += listStartsNewPage ? 2 : 1
         used = 0
         requiresReflow = true
+        return
+      }
+      if (listStartsNewPage) {
+        // A lista inteira cabe na página seguinte: basta inserir a quebra
+        // antes dela. Não dividimos a lista nem pedimos outro reflow, pois o
+        // próximo bloco ainda pode precisar de uma quebra própria.
+        insertions.push({ pos: startBreakPos, height: startBreakHeight })
+        used = Math.min(
+          usable,
+          startBreakConsumedHeight + blockHeight - marginTop,
+        )
+        pages++
+        return
+      }
+      if (splitAt === -1) {
+        // Todos os itens cabem na página física atual, mesmo que a soma
+        // lógica de alturas tenha ultrapassado o limite por causa de margens
+        // colapsadas. Sincroniza `used` com a geometria real para que os
+        // próximos blocos não sejam movidos por um valor inflado.
+        used = Math.max(
+          0,
+          Math.min(
+            usable,
+            listTopAfterPendingBreaks - pageContentTop + blockHeight - marginTop,
+          ),
+        )
         return
       }
     }
