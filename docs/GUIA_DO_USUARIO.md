@@ -78,7 +78,7 @@ Na guia **Layout**:
 - Imagens maiores que a área útil são reduzidas proporcionalmente para caber na folha. Uma imagem que cabe na página, mas não no espaço restante, começa na próxima página; o conteúdo não deve ocupar o vão cinza entre folhas.
 - Cada folha mantém o tamanho escolhido em **Papel** (A4, Carta, Ofício/Legal, A3 ou A5). O editor adiciona páginas com as mesmas dimensões, sem alterar o tamanho das páginas anteriores.
 - O rodapé mostra **Página atual de total**.
-- **Visualizar / PDF** abre a janela de impressão do navegador; selecione **Salvar como PDF** para criar um PDF.
+- **Visualizar / PDF** abre a janela de impressão do navegador; selecione **Salvar como PDF** para criar um PDF com o mesmo papel, as mesmas margens e as mesmas páginas do editor. Na caixa de impressão, não altere as margens nem a escala (100%) e desmarque **Cabeçalhos e rodapés**.
 
 O navegador pode paginar de maneira um pouco diferente do Word por diferenças de fontes, impressão e métricas de texto.
 
@@ -101,7 +101,7 @@ Em **Inserir → Arquivo → Abrir documento**, escolha `.docx`, `.txt`, `.md`, 
 Abra **Salvar** no topo e escolha um formato:
 
 - **Word (.docx):** inclui texto, formatação comum, listas, tabelas, imagens, links, quebras e tamanho de página/margens.
-- **PDF / Imprimir:** abre a caixa de impressão do navegador. Escolha **Salvar como PDF**.
+- **PDF / Imprimir:** abre a caixa de impressão do navegador. Escolha **Salvar como PDF**. O PDF usa o papel e as margens do documento e mantém as páginas do editor; não altere as margens nem a escala (100%) e desmarque **Cabeçalhos e rodapés**.
 - **Texto (.txt):** exporta o texto sem formatação.
 - **HTML:** exporta estrutura e formatação suportadas pelo editor.
 - **Markdown (.md):** exporta o conteúdo textual; não converte todas as marcas de formatação para sintaxe Markdown.

@@ -14,10 +14,11 @@ Read `docs/ARQUITETURA_E_DESENVOLVIMENTO.md`, especially “Paginação e papel,
 - Keep document content inside the useful page area and out of the visual inter-page gap, including long paragraphs, lists, tables and floated images.
 - For bullet and numbered lists, keep content that fits on the current page. Split between list items when the next item overflows; if a paragraph inside a list item crosses the page limit, split its text and continue the item without repeating its bullet/number. Preserve following ordered-list numbering in continuation fragments.
 - Reflow transactions must not pollute user undo history. Avoid recursive pagination dispatch; respect the `paginating` guard and reflow callback.
-- Preserve selected paper dimensions and keep CSS `@page`, visible sheet size, margin fields and rulers in agreement.
+- Preserve selected paper dimensions and keep CSS `@page`, visible sheet size, margin fields and rulers in agreement. The app injects `@page { size: <paper>; margin: <margins> }`; do not reintroduce a fixed fallback that overrides it.
 - Horizontal and vertical rulers should share visual styling, scale/tick rhythm, border treatment, handles and pointer behavior while retaining their respective axes.
 - Margin drag math must be clamped to valid limits, measured against the correct ruler/page geometry, and stay synchronized with numeric Layout inputs.
 - Check `@media print`: screen-only gaps, rulers and canvas backgrounds should not create extra printed content.
+- The PDF must match the editor page-for-page. `article` and `.page-layout` receive inline `width`/`min-width`/`min-height`/`padding` from React, so the print block must reset them with `!important` and `padding: 0`; otherwise Chrome shrinks the scale to fit the wider sheet and line wrapping changes. Also set `print-color-adjust: exact` so table headers, code blocks and highlights keep their backgrounds. Set `html{background:#fff!important}`: the on-screen `:root` background is gray, and without the override Chrome prints it as a gray band in the blank remainder of the last page.
 
 ## Key code
 
