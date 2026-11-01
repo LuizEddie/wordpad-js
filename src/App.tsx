@@ -168,6 +168,24 @@ function maxRunPt(nodes: EditorNode[] = [], fallback = DOCX_BASE_PT): number {
 }
 
 function headingSizePt(level: number) { return level <= 1 ? 24 : level === 2 ? 18 : DOCX_BASE_PT }
+function parseFontSizePt(value: unknown, basePt = DOCX_BASE_PT): number | undefined {
+  const text = String(value ?? '').trim().toLowerCase()
+  const num = Number.parseFloat(text)
+  if (!Number.isFinite(num) || num <= 0) return undefined
+  if (text.endsWith('px')) return num * 0.75
+  if (text.endsWith('em') || text.endsWith('rem')) return num * basePt
+  return num
+}
+const LINK_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:'])
+function resolveLinkUrl(href: string | null | undefined): string | undefined {
+  const raw = String(href ?? '').trim()
+  if (!raw) return undefined
+  const candidate = /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : raw.startsWith('//') ? `https:${raw}` : `https://${raw}`
+  try {
+    const url = new URL(candidate)
+    return LINK_PROTOCOLS.has(url.protocol) ? url.href : undefined
+  } catch { return undefined }
+}
 function headingLineHeight(level: number) { return level <= 1 ? 1.2 : DOCX_LINE_HEIGHT }
 function headingGap(level: number) {
   if (level <= 1) return { before: 96, after: 312 } // .2em / .65em of 24pt
@@ -1021,6 +1039,17 @@ export default function App() {
         view.dispatch(view.state.tr.insertText('\t'))
         return true
       },
+      // A plain click on a link follows it. Modifier clicks keep the default
+      // editing behavior so the text can still be selected/edited.
+      handleClick: (_view, _pos, event) => {
+        if (event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false
+        const anchor = (event.target as HTMLElement | null)?.closest?.('a[href]')
+        const url = anchor ? resolveLinkUrl(anchor.getAttribute('href')) : undefined
+        if (!url) return false
+        if (url.startsWith('mailto:') || url.startsWith('tel:')) window.location.href = url
+        else window.open(url, '_blank', 'noopener,noreferrer')
+        return true
+      },
     },
     onUpdate: ({ editor: instance }) => { if (paginationInProgress.current) return; setStatus('Alterações não salvas'); setContentRevision(value => value + 1); let count = 0; instance.state.doc.descendants(node => { if (node.type.name === 'pageBreak') count++ }); setPageCount(count + 1) },
     onSelectionUpdate: ({ editor: instance }) => { let page = 1; const cursor = instance.state.selection.from; instance.state.doc.descendants((node, position) => { if (node.type.name === 'pageBreak' && position < cursor) page++ }); setCurrentPage(page) },
@@ -1277,6 +1306,14 @@ export default function App() {
   const ContextItem = ({ label, icon, action, disabled = false, active = false }: { label: string; icon: React.ReactNode; action: () => void; disabled?: boolean; active?: boolean }) => <button type="button" role="menuitem" className={`context-menu-item ${active ? 'active' : ''}`} disabled={disabled} onMouseDown={event => event.preventDefault()} onClick={() => { action(); setContextMenu(null) }}>{icon}<span>{label}</span></button>
   const fontFamily = (family: string) => editor.chain().focus().setFontFamily(family).run()
   const setFontSize = (size: string) => editor.chain().focus().setMark('textStyle', { fontSize: `${size}pt` }).run()
+  // Mirrors the size used by the caret/selection: the explicit textStyle mark
+  // wins; otherwise fall back to the font size the block (heading or body) renders with.
+  const cursorHeadingLevel = editor.isActive('heading') ? Number(editor.getAttributes('heading').level) : 0
+  const cursorBlockPt = cursorHeadingLevel ? headingSizePt(cursorHeadingLevel) : DOCX_BASE_PT
+  const cursorExplicitPt = parseFontSizePt(editor.getAttributes('textStyle').fontSize, cursorBlockPt)
+  const fontSizeAtCursor = cursorExplicitPt ?? cursorBlockPt
+  const fontSizeValue = String(Number(fontSizeAtCursor.toFixed(1)))
+  const fontSizeOptions = ['8', '9', '10', '11', '12', '14', '16', '18', '20', '24', '28', '36', '48', '72']
   const selectedImage = editor.isActive('image')
   const imageAttrs = editor.getAttributes('image')
   const selectedImageDom = selectedImage ? editor.view.nodeDOM(editor.state.selection.from) as HTMLImageElement | null : null
@@ -1287,7 +1324,7 @@ export default function App() {
     <div className="group"><Tool label="Desfazer" action={() => editor.chain().focus().undo().run()}><Undo2 /></Tool><Tool label="Refazer" action={() => editor.chain().focus().redo().run()}><Redo2 /></Tool></div><i />
     <select aria-label="Estilo do parágrafo" value={editor.isActive('heading', { level: 1 }) ? 'h1' : editor.isActive('heading', { level: 2 }) ? 'h2' : 'p'} onChange={e => e.target.value === 'p' ? editor.chain().focus().setParagraph().run() : editor.chain().focus().toggleHeading({ level: e.target.value === 'h1' ? 1 : 2 }).run()}><option value="p">Texto normal</option><option value="h1">Título 1</option><option value="h2">Título 2</option></select>
     <select aria-label="Fonte" defaultValue="Arial" onChange={e => fontFamily(e.target.value)}><option>Arial</option><option>Georgia</option><option>Times New Roman</option><option>Courier New</option><option>Verdana</option><option>Tahoma</option></select>
-    <select aria-label="Tamanho da fonte" defaultValue="12" onChange={e => setFontSize(e.target.value)}>{['8', '9', '10', '11', '12', '14', '16', '18', '20', '24', '28', '36', '48', '72'].map(size => <option key={size} value={size}>{size} pt</option>)}</select><i />
+    <select aria-label="Tamanho da fonte" value={fontSizeValue} onChange={e => setFontSize(e.target.value)}>{fontSizeOptions.map(size => <option key={size} value={size}>{size} pt</option>)}{!fontSizeOptions.includes(fontSizeValue) && <option value={fontSizeValue}>{fontSizeValue} pt</option>}</select><i />
     <div className="group"><Tool label="Negrito" active={editor.isActive('bold')} action={() => editor.chain().focus().toggleBold().run()}><Bold /></Tool><Tool label="Itálico" active={editor.isActive('italic')} action={() => editor.chain().focus().toggleItalic().run()}><Italic /></Tool><Tool label="Sublinhado" active={editor.isActive('underline')} action={() => editor.chain().focus().toggleUnderline().run()}><UnderlineIcon /></Tool><Tool label="Tachado" active={editor.isActive('strike')} action={() => editor.chain().focus().toggleStrike().run()}><Strikethrough /></Tool><Tool label="Sobrescrito" active={editor.isActive('superscript')} action={() => editor.chain().focus().toggleSuperscript().run()}><SuperscriptIcon /></Tool><Tool label="Subscrito" active={editor.isActive('subscript')} action={() => editor.chain().focus().toggleSubscript().run()}><SubscriptIcon /></Tool></div><i />
     <div className="color-picker"><button ref={fontColorButton} type="button" className="color-tool font-color-button" title="Aplicar cor da fonte" aria-label="Aplicar cor da fonte" onClick={() => applyFontColor(fontColor)}><Type /><span style={{ backgroundColor: fontColor }} /></button><button type="button" className="color-caret" title="Escolher cor da fonte" aria-label="Escolher cor da fonte" onClick={() => { setColorMenuPosition(popupPosition(fontColorButton.current, 210)); setFontPaletteOpen(open => !open) }}><ChevronDown size={13} /></button>{fontPaletteOpen && <div className="color-menu" style={colorMenuPosition}><strong>Cor da fonte</strong><div className="color-swatches">{FONT_COLORS.map(color => <button key={color} type="button" title={color} aria-label={`Cor ${color}`} style={{ backgroundColor: color }} onClick={() => applyFontColor(color)} />)}</div><label>Personalizada<input type="color" value={fontColor} onChange={e => { setFontColor(e.target.value); editor.chain().focus().setColor(e.target.value).run() }} /></label></div>}</div><label className="color-tool" title="Realce"><Highlighter /><input type="color" aria-label="Cor do realce" defaultValue="#fff176" onChange={e => editor.chain().focus().toggleHighlight({ color: e.target.value }).run()} /></label><Tool label="Remover formatação" action={() => editor.chain().focus().unsetAllMarks().clearNodes().run()}><RemoveFormatting /></Tool><i />
     <div className="group"><Tool label="Alinhar à esquerda" active={editor.isActive({ textAlign: 'left' })} action={() => editor.chain().focus().setTextAlign('left').run()}><AlignLeft /></Tool><Tool label="Centralizar" active={editor.isActive({ textAlign: 'center' })} action={() => editor.chain().focus().setTextAlign('center').run()}><AlignCenter /></Tool><Tool label="Alinhar à direita" active={editor.isActive({ textAlign: 'right' })} action={() => editor.chain().focus().setTextAlign('right').run()}><AlignRight /></Tool><Tool label="Justificar" active={editor.isActive({ textAlign: 'justify' })} action={() => editor.chain().focus().setTextAlign('justify').run()}><AlignJustify /></Tool></div><i />

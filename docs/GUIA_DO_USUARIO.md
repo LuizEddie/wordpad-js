@@ -21,7 +21,7 @@ Na guia **Página Inicial** você encontra:
 
 - **Desfazer e refazer:** reverta ou reaplique alterações recentes.
 - **Estilo de parágrafo:** texto normal, Título 1 ou Título 2.
-- **Fonte e tamanho:** escolha a família tipográfica e o tamanho em pontos.
+- **Fonte e tamanho:** escolha a família tipográfica e o tamanho em pontos. O campo de tamanho mostra o tamanho usado no ponto do cursor (ou no início da seleção) e acompanha o estilo do parágrafo: Título 1 aparece como 24 pt e Título 2 como 18 pt.
 - **Negrito, itálico, sublinhado, tachado, sobrescrito e subscrito.**
 - **Cor da fonte:** clique no ícone de letra para aplicar a cor atual; use a seta para abrir a paleta e escolher uma cor pronta ou personalizada.
 - **Realce:** selecione uma cor para destacar o texto.
@@ -52,6 +52,8 @@ Na guia **Inserir**, cada botão abre um menu com ações relacionadas.
 ### Link
 
 Abra **Link → Adicionar ou editar link** com o cursor em um texto selecionado. Informe o endereço quando solicitado. Para retirar um link, selecione um trecho vinculado e escolha **Remover link**.
+
+Um clique em um link abre o endereço em uma nova aba; links de e-mail e telefone abrem o aplicativo correspondente. Para posicionar o cursor ou selecionar o texto do link sem abri-lo, mantenha **Alt** (ou **Ctrl**) pressionado ao clicar.
 
 ### Tabela
 
