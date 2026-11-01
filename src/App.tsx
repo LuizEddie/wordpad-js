@@ -22,7 +22,7 @@ import mammoth from 'mammoth'
 import JSZip from 'jszip'
 import { convertDocxToEditableHtml } from './docx-import'
 import {
-  AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, Check, ChevronDown, CircleHelp, Printer,
+  AlignCenter, AlignJustify, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, Check, ChevronDown, CircleHelp, Printer,
   ClipboardPaste, Code2, Copy, FilePlus2, FileText, Highlighter, ImagePlus, Italic, Link2,
   List, ListOrdered, Menu, Minus, Plus, Quote, Redo2, Save, Strikethrough,
   Table2, Underline as UnderlineIcon, Undo2, Upload, X, Superscript as SuperscriptIcon,
@@ -186,6 +186,50 @@ function resolveLinkUrl(href: string | null | undefined): string | undefined {
     return LINK_PROTOCOLS.has(url.protocol) ? url.href : undefined
   } catch { return undefined }
 }
+
+// The docxLayout attribute stores the paragraph spacing as a small CSS
+// declaration list. Keeping it in sync with what the DOCX writer reads lets
+// the editor and the exported file share one source of truth.
+type BlockSpacing = { lineHeight: number; beforePt: number; afterPt: number }
+function parseLayoutDeclarations(layout: unknown): Record<string, string> {
+  const declarations: Record<string, string> = {}
+  String(layout ?? '').split(';').forEach(part => {
+    const separator = part.indexOf(':')
+    if (separator < 0) return
+    const key = part.slice(0, separator).trim().toLowerCase()
+    const value = part.slice(separator + 1).trim()
+    if (key && value) declarations[key] = value
+  })
+  return declarations
+}
+function serializeLayoutDeclarations(declarations: Record<string, string>): string | null {
+  const parts = Object.entries(declarations).filter(([, value]) => value).map(([key, value]) => `${key}:${value}`)
+  return parts.length ? parts.join(';') : null
+}
+function cssLengthToPt(value: unknown, emPt = DOCX_BASE_PT): number | undefined {
+  const match = String(value ?? '').trim().match(/^(-?\d*\.?\d+)(px|pt|in|cm|mm|em|rem)?$/i)
+  if (!match) return undefined
+  const amount = Number.parseFloat(match[1])
+  if (!Number.isFinite(amount)) return undefined
+  const unit = (match[2] || 'px').toLowerCase()
+  if (unit === 'pt') return amount
+  if (unit === 'em') return amount * emPt
+  if (unit === 'rem') return amount * DOCX_BASE_PT
+  const px = unit === 'in' ? amount * 96 : unit === 'cm' ? (amount * 96) / 2.54 : unit === 'mm' ? (amount * 96) / 25.4 : amount
+  return px * 0.75
+}
+// Reads the spacing the browser actually paints for the block, so headings,
+// list items and imported documents start the dialog with their real values.
+function readBlockSpacing(element: HTMLElement | null): BlockSpacing {
+  const style = element ? window.getComputedStyle(element) : null
+  const fontPx = Number.parseFloat(style?.fontSize || '') || DOCX_BASE_PT / 0.75
+  const fontPt = fontPx * 0.75
+  const beforePx = Number.parseFloat(style?.marginTop || '') || 0
+  const afterPx = Number.parseFloat(style?.marginBottom || '') || 0
+  const linePx = Number.parseFloat(style?.lineHeight || '')
+  const lineHeight = Number.isFinite(linePx) && linePx > 0 ? (linePx * 0.75) / fontPt : DOCX_LINE_HEIGHT
+  return { lineHeight: Number(lineHeight.toFixed(2)), beforePt: Number((beforePx * 0.75).toFixed(1)), afterPt: Number((afterPx * 0.75).toFixed(1)) }
+}
 function headingLineHeight(level: number) { return level <= 1 ? 1.2 : DOCX_LINE_HEIGHT }
 function headingGap(level: number) {
   if (level <= 1) return { before: 96, after: 312 } // .2em / .65em of 24pt
@@ -288,9 +332,15 @@ function docxBlocks(node: EditorNode, context: DocxBlockContext = {}, state: Doc
       const last = index === content.length - 1
       if (item.type !== 'paragraph') return docxBlocks(item, { ...context, listEnd: Boolean(context.listEnd) && last }, state)
       const fontPt = Math.max(DOCX_BASE_PT, maxRunPt(item.content))
+      const itemCss = parseLayoutDeclarations(item.attrs?.docxLayout)
       // The browser gives list containers a 1em bottom margin but no gap
       // between items, so only the last item of the outermost list carries it.
-      const spacing = { before: 0, after: context.listEnd && last && !context.listContinues ? 240 : 0, line: exactLine(fontPt, DOCX_LINE_HEIGHT), lineRule: LineRuleType.EXACT }
+      const spacing = {
+        before: cssLengthToTwips(itemCss['margin-top'], fontPt) ?? 0,
+        after: cssLengthToTwips(itemCss['margin-bottom'], fontPt) ?? (context.listEnd && last && !context.listContinues ? 240 : 0),
+        line: cssLineHeightToTwips(itemCss['line-height'], fontPt) ?? exactLine(fontPt, DOCX_LINE_HEIGHT),
+        lineRule: LineRuleType.EXACT,
+      }
       const indent = list ? listLevelIndent(list.level) : undefined
       const left = (indent?.left || 0) + quoteIndent
       // Only the first paragraph of an item carries the marker; following
@@ -320,7 +370,16 @@ function docxBlocks(node: EditorNode, context: DocxBlockContext = {}, state: Doc
             // <th> centres its content in the browser and every cell paragraph
             // keeps the editor's 1em bottom margin, which sets the row height.
             alignment: paragraph.attrs?.textAlign === 'center' ? AlignmentType.CENTER : paragraph.attrs?.textAlign === 'right' ? AlignmentType.RIGHT : paragraph.attrs?.textAlign === 'justify' ? AlignmentType.JUSTIFIED : header ? AlignmentType.CENTER : AlignmentType.LEFT,
-            spacing: { before: 0, after: 240, line: exactLine(Math.max(DOCX_BASE_PT, maxRunPt(paragraph.content)), DOCX_LINE_HEIGHT), lineRule: LineRuleType.EXACT },
+            spacing: (() => {
+              const css = parseLayoutDeclarations(paragraph.attrs?.docxLayout)
+              const fontPt = Math.max(DOCX_BASE_PT, maxRunPt(paragraph.content))
+              return {
+                before: cssLengthToTwips(css['margin-top'], fontPt) ?? 0,
+                after: cssLengthToTwips(css['margin-bottom'], fontPt) ?? 240,
+                line: cssLineHeightToTwips(css['line-height'], fontPt) ?? exactLine(fontPt, DOCX_LINE_HEIGHT),
+                lineRule: LineRuleType.EXACT,
+              }
+            })(),
             widowControl: true,
           })]
           : docxBlocks(paragraph, {}, state))
@@ -1011,11 +1070,16 @@ export default function App() {
   const [tableHover, setTableHover] = useState({ rows: 3, cols: 3 })
   const [colorMenuPosition, setColorMenuPosition] = useState({ top: 0, left: 0 })
   const [insertMenuPosition, setInsertMenuPosition] = useState({ top: 0, left: 0 })
+  const [spacingMenuOpen, setSpacingMenuOpen] = useState(false)
+  const [spacingMenuPosition, setSpacingMenuPosition] = useState({ top: 0, left: 0 })
+  const [spacingDialogOpen, setSpacingDialogOpen] = useState(false)
+  const [spacingDraft, setSpacingDraft] = useState({ line: '1.65', before: '0', after: '12' })
   const [tab, setTab] = useState<'home' | 'insert' | 'layout'>('home')
   const [margins, setMargins] = useState<Margins>({ left: 1, right: 1, top: 1, bottom: 1 })
   const fileInput = useRef<HTMLInputElement>(null)
   const imageInput = useRef<HTMLInputElement>(null)
   const fontColorButton = useRef<HTMLButtonElement>(null)
+  const spacingButton = useRef<HTMLButtonElement>(null)
   const horizontalRuler = useRef<HTMLDivElement>(null)
   const verticalRuler = useRef<HTMLDivElement>(null)
   const contextMenuRef = useRef<HTMLDivElement>(null)
@@ -1069,6 +1133,25 @@ export default function App() {
     window.addEventListener('keydown', closeOnEscape)
     return () => window.removeEventListener('keydown', closeOnEscape)
   }, [helpOpen])
+  useEffect(() => {
+    if (!spacingMenuOpen) return
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setSpacingMenuOpen(false) }
+    const closeOutside = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null
+      if (spacingButton.current?.contains(target)) return
+      if (target?.closest?.('.spacing-menu')) return
+      setSpacingMenuOpen(false)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    document.addEventListener('pointerdown', closeOutside)
+    return () => { window.removeEventListener('keydown', closeOnEscape); document.removeEventListener('pointerdown', closeOutside) }
+  }, [spacingMenuOpen])
+  useEffect(() => {
+    if (!spacingDialogOpen) return
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setSpacingDialogOpen(false) }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [spacingDialogOpen])
   useEffect(() => {
     if (!contextMenu) return
     const positionMenu = () => {
@@ -1314,6 +1397,77 @@ export default function App() {
   const fontSizeAtCursor = cursorExplicitPt ?? cursorBlockPt
   const fontSizeValue = String(Number(fontSizeAtCursor.toFixed(1)))
   const fontSizeOptions = ['8', '9', '10', '11', '12', '14', '16', '18', '20', '24', '28', '36', '48', '72']
+  // Paragraph spacing follows the selection: a caret edits its own block, a
+  // range edits every paragraph/heading it touches.
+  const spacingTargets = () => {
+    const { state } = editor
+    const { from, to, empty, $from } = state.selection
+    const positions: number[] = []
+    const isTextBlock = (node: { type: { name: string } }) => node.type.name === 'paragraph' || node.type.name === 'heading'
+    if (empty) {
+      for (let depth = $from.depth; depth > 0; depth--) {
+        if (isTextBlock($from.node(depth))) { positions.push($from.before(depth)); break }
+      }
+      return positions
+    }
+    state.doc.nodesBetween(from, to, (node, pos) => { if (isTextBlock(node)) positions.push(pos) })
+    return positions
+  }
+  const targetSpacing = (): BlockSpacing | null => {
+    const position = spacingTargets()[0]
+    return position === undefined ? null : readBlockSpacing(editor.view.nodeDOM(position) as HTMLElement | null)
+  }
+  const applyBlockSpacing = (patch: Partial<Record<'lineHeight' | 'beforePt' | 'afterPt', number | null>>, reset = false) => {
+    const positions = spacingTargets()
+    if (!positions.length) return
+    const transaction = editor.state.tr
+    for (const position of positions) {
+      const node = transaction.doc.nodeAt(position)
+      if (!node) continue
+      const declarations = parseLayoutDeclarations(node.attrs.docxLayout)
+      if (reset) { delete declarations['line-height']; delete declarations['margin-top']; delete declarations['margin-bottom'] }
+      if (patch.lineHeight !== undefined) {
+        if (patch.lineHeight === null) delete declarations['line-height']
+        else declarations['line-height'] = String(Number(patch.lineHeight.toFixed(2)))
+      }
+      if (patch.beforePt !== undefined) {
+        if (patch.beforePt === null) delete declarations['margin-top']
+        else declarations['margin-top'] = `${Number(patch.beforePt.toFixed(1))}pt`
+      }
+      if (patch.afterPt !== undefined) {
+        if (patch.afterPt === null) delete declarations['margin-bottom']
+        else declarations['margin-bottom'] = `${Number(patch.afterPt.toFixed(1))}pt`
+      }
+      transaction.setNodeMarkup(position, undefined, { ...node.attrs, docxLayout: serializeLayoutDeclarations(declarations) })
+    }
+    editor.view.dispatch(transaction)
+    editor.view.focus()
+  }
+  const spacingNow = spacingMenuOpen || spacingDialogOpen ? targetSpacing() : null
+  const setLineSpacing = (value: number) => { applyBlockSpacing({ lineHeight: value }); setSpacingMenuOpen(false) }
+  const adjustParagraphSpacing = (side: 'before' | 'after', delta: number) => {
+    const spacing = targetSpacing()
+    if (!spacing) return
+    const next = Math.max(0, (side === 'before' ? spacing.beforePt : spacing.afterPt) + delta)
+    applyBlockSpacing(side === 'before' ? { beforePt: next } : { afterPt: next })
+    setSpacingMenuOpen(false)
+  }
+  const resetBlockSpacing = () => { applyBlockSpacing({}, true); setSpacingMenuOpen(false) }
+  const openSpacingDialog = () => {
+    const spacing = targetSpacing()
+    if (!spacing) return
+    setSpacingDraft({ line: String(spacing.lineHeight), before: String(spacing.beforePt), after: String(spacing.afterPt) })
+    setSpacingMenuOpen(false)
+    setSpacingDialogOpen(true)
+  }
+  const applyCustomSpacing = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const line = Math.min(4, Math.max(0.5, Number.parseFloat(spacingDraft.line) || DOCX_LINE_HEIGHT))
+    const before = Math.min(400, Math.max(0, Number.parseFloat(spacingDraft.before) || 0))
+    const after = Math.min(400, Math.max(0, Number.parseFloat(spacingDraft.after) || 0))
+    applyBlockSpacing({ lineHeight: line, beforePt: before, afterPt: after })
+    setSpacingDialogOpen(false)
+  }
   const selectedImage = editor.isActive('image')
   const imageAttrs = editor.getAttributes('image')
   const selectedImageDom = selectedImage ? editor.view.nodeDOM(editor.state.selection.from) as HTMLImageElement | null : null
@@ -1328,6 +1482,24 @@ export default function App() {
     <div className="group"><Tool label="Negrito" active={editor.isActive('bold')} action={() => editor.chain().focus().toggleBold().run()}><Bold /></Tool><Tool label="Itálico" active={editor.isActive('italic')} action={() => editor.chain().focus().toggleItalic().run()}><Italic /></Tool><Tool label="Sublinhado" active={editor.isActive('underline')} action={() => editor.chain().focus().toggleUnderline().run()}><UnderlineIcon /></Tool><Tool label="Tachado" active={editor.isActive('strike')} action={() => editor.chain().focus().toggleStrike().run()}><Strikethrough /></Tool><Tool label="Sobrescrito" active={editor.isActive('superscript')} action={() => editor.chain().focus().toggleSuperscript().run()}><SuperscriptIcon /></Tool><Tool label="Subscrito" active={editor.isActive('subscript')} action={() => editor.chain().focus().toggleSubscript().run()}><SubscriptIcon /></Tool></div><i />
     <div className="color-picker"><button ref={fontColorButton} type="button" className="color-tool font-color-button" title="Aplicar cor da fonte" aria-label="Aplicar cor da fonte" onClick={() => applyFontColor(fontColor)}><Type /><span style={{ backgroundColor: fontColor }} /></button><button type="button" className="color-caret" title="Escolher cor da fonte" aria-label="Escolher cor da fonte" onClick={() => { setColorMenuPosition(popupPosition(fontColorButton.current, 210)); setFontPaletteOpen(open => !open) }}><ChevronDown size={13} /></button>{fontPaletteOpen && <div className="color-menu" style={colorMenuPosition}><strong>Cor da fonte</strong><div className="color-swatches">{FONT_COLORS.map(color => <button key={color} type="button" title={color} aria-label={`Cor ${color}`} style={{ backgroundColor: color }} onClick={() => applyFontColor(color)} />)}</div><label>Personalizada<input type="color" value={fontColor} onChange={e => { setFontColor(e.target.value); editor.chain().focus().setColor(e.target.value).run() }} /></label></div>}</div><label className="color-tool" title="Realce"><Highlighter /><input type="color" aria-label="Cor do realce" defaultValue="#fff176" onChange={e => editor.chain().focus().toggleHighlight({ color: e.target.value }).run()} /></label><Tool label="Remover formatação" action={() => editor.chain().focus().unsetAllMarks().clearNodes().run()}><RemoveFormatting /></Tool><i />
     <div className="group"><Tool label="Alinhar à esquerda" active={editor.isActive({ textAlign: 'left' })} action={() => editor.chain().focus().setTextAlign('left').run()}><AlignLeft /></Tool><Tool label="Centralizar" active={editor.isActive({ textAlign: 'center' })} action={() => editor.chain().focus().setTextAlign('center').run()}><AlignCenter /></Tool><Tool label="Alinhar à direita" active={editor.isActive({ textAlign: 'right' })} action={() => editor.chain().focus().setTextAlign('right').run()}><AlignRight /></Tool><Tool label="Justificar" active={editor.isActive({ textAlign: 'justify' })} action={() => editor.chain().focus().setTextAlign('justify').run()}><AlignJustify /></Tool></div><i />
+    <div className="spacing-picker">
+      <button ref={spacingButton} type="button" className={`tool ${spacingMenuOpen ? 'active' : ''}`} title="Espaçamento entre linhas e parágrafos" aria-label="Espaçamento entre linhas e parágrafos" aria-haspopup="menu" aria-expanded={spacingMenuOpen} onClick={() => { setSpacingMenuPosition(popupPosition(spacingButton.current, 268)); setSpacingMenuOpen(open => !open) }}><AlignVerticalSpaceAround /></button>
+      {spacingMenuOpen && <div className="spacing-menu" role="menu" aria-label="Espaçamento" style={spacingMenuPosition}>
+        <strong className="spacing-menu-title">Espaçamento entre linhas</strong>
+        {[{ value: 1, label: '1,0' }, { value: 1.15, label: '1,15' }, { value: 1.5, label: '1,5' }, { value: 2, label: '2,0' }].map(preset => {
+          const checked = Boolean(spacingNow && Math.abs(spacingNow.lineHeight - preset.value) < 0.02)
+          return <button key={preset.value} type="button" role="menuitemradio" aria-checked={checked} className="spacing-menu-item" onClick={() => setLineSpacing(preset.value)}><span>{preset.label}</span>{checked && <Check size={16} />}</button>
+        })}
+        <div className="spacing-menu-separator" />
+        <button type="button" role="menuitem" className="spacing-menu-item" onClick={() => adjustParagraphSpacing('before', 12)}><Plus size={15} /><span>Adicionar espaço antes do parágrafo</span></button>
+        <button type="button" role="menuitem" className="spacing-menu-item" onClick={() => adjustParagraphSpacing('after', 12)}><Plus size={15} /><span>Adicionar espaço depois do parágrafo</span></button>
+        <button type="button" role="menuitem" className="spacing-menu-item" onClick={openSpacingDialog}><AlignVerticalSpaceAround size={15} /><span>Espaçamento personalizado…</span></button>
+        <button type="button" role="menuitem" className="spacing-menu-item" disabled={!spacingNow || spacingNow.beforePt <= 0} onClick={() => adjustParagraphSpacing('before', -12)}><Minus size={15} /><span>Remover espaço antes do parágrafo</span></button>
+        <button type="button" role="menuitem" className="spacing-menu-item" disabled={!spacingNow || spacingNow.afterPt <= 0} onClick={() => adjustParagraphSpacing('after', -12)}><Minus size={15} /><span>Remover espaço depois do parágrafo</span></button>
+        <div className="spacing-menu-separator" />
+        <button type="button" role="menuitem" className="spacing-menu-item" onClick={resetBlockSpacing}><Undo2 size={15} /><span>Redefinir espaçamento</span></button>
+      </div>}
+    </div><i />
     <div className="group"><Tool label="Lista com marcadores" active={editor.isActive('bulletList')} action={() => editor.chain().focus().toggleBulletList().run()}><List /></Tool><Tool label="Lista numerada" active={editor.isActive('orderedList')} action={() => editor.chain().focus().toggleOrderedList().run()}><ListOrdered /></Tool><Tool label="Citação" active={editor.isActive('blockquote')} action={() => editor.chain().focus().toggleBlockquote().run()}><Quote /></Tool><Tool label="Bloco de código" active={editor.isActive('codeBlock')} action={() => editor.chain().focus().toggleCodeBlock().run()}><Code2 /></Tool></div>
   </div>
   const insertTools = <div className="tools insert-tools">
@@ -1456,6 +1628,18 @@ export default function App() {
       {selectedImage && <ContextItem label="Remover imagem" icon={<X />} action={() => editor.chain().focus().deleteSelection().run()} />}
     </div>}
     {helpOpen && <div className="help-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setHelpOpen(false) }}><section className="help-dialog" role="dialog" aria-modal="true" aria-labelledby="help-title"><header className="help-dialog-header"><strong id="help-title"><CircleHelp size={18} /> Guia completo de uso</strong><button type="button" className="tool" aria-label="Fechar guia" onClick={() => setHelpOpen(false)}><X size={18} /></button></header><iframe title="Guia do usuário do Wordpad" src={`${import.meta.env.BASE_URL}guia-do-usuario.html`} /></section></div>}
+    {spacingDialogOpen && <div className="spacing-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setSpacingDialogOpen(false) }}>
+      <form className="spacing-dialog" role="dialog" aria-modal="true" aria-labelledby="spacing-dialog-title" onSubmit={applyCustomSpacing}>
+        <header className="spacing-dialog-header"><strong id="spacing-dialog-title"><AlignVerticalSpaceAround size={18} /> Espaçamento personalizado</strong><button type="button" className="tool" aria-label="Fechar espaçamento personalizado" onClick={() => setSpacingDialogOpen(false)}><X size={18} /></button></header>
+        <div className="spacing-dialog-body">
+          <label>Entre linhas<input aria-label="Espaçamento entre linhas (multiplicador)" type="number" min="0.5" max="4" step="any" value={spacingDraft.line} onChange={event => setSpacingDraft(draft => ({ ...draft, line: event.target.value }))} /><span>×</span></label>
+          <label>Espaço antes do parágrafo<input aria-label="Espaço antes do parágrafo em pontos" type="number" min="0" max="400" step="any" value={spacingDraft.before} onChange={event => setSpacingDraft(draft => ({ ...draft, before: event.target.value }))} /><span>pt</span></label>
+          <label>Espaço depois do parágrafo<input aria-label="Espaço depois do parágrafo em pontos" type="number" min="0" max="400" step="any" value={spacingDraft.after} onChange={event => setSpacingDraft(draft => ({ ...draft, after: event.target.value }))} /><span>pt</span></label>
+          <p>O espaçamento vale para os parágrafos selecionados ou para o parágrafo onde está o cursor.</p>
+        </div>
+        <footer className="spacing-dialog-footer"><button type="button" className="insert-action" onClick={() => setSpacingDialogOpen(false)}>Cancelar</button><button type="submit" className="insert-action spacing-apply">Aplicar</button></footer>
+      </form>
+    </div>}
   </div>
 }
 

@@ -27,6 +27,7 @@ Na guia **Página Inicial** você encontra:
 - **Realce:** selecione uma cor para destacar o texto.
 - **Remover formatação:** retire marcas e estilo de bloco da seleção.
 - **Alinhamento:** esquerda, centro, direita ou justificado.
+- **Espaçamento entre linhas e parágrafos:** abra o botão de espaçamento para escolher 1,0, 1,15, 1,5 ou 2,0; adicionar ou remover 12 pt antes ou depois do parágrafo; ou usar **Espaçamento personalizado** para informar o multiplicador de linha e os espaços antes e depois em pontos. A mudança vale para os parágrafos selecionados ou para o parágrafo do cursor. **Redefinir espaçamento** volta ao padrão do estilo.
 - **Listas:** marcadores e numeração. Posicione o cursor em um parágrafo ou selecione vários parágrafos antes de ativar o tipo desejado. Pressione Enter para continuar a lista; em um item vazio, pressione Enter novamente para sair.
 - **Citação e bloco de código.**
 
