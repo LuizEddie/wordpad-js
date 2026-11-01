@@ -202,6 +202,56 @@ function parseFontFamily(value: unknown): string {
   const first = String(value ?? '').split(',')[0].trim().replace(/^["']+|["']+$/g, '').trim()
   return first || DEFAULT_FONT_FAMILY
 }
+// Clipboard HTML often puts font-family/font-size/color on a container (or in a
+// legacy <font> tag) instead of on every run. ProseMirror only reads inline
+// styles from the element that carries the text, so flatten the inherited
+// values into a span around each text node before parsing the paste.
+const PASTED_INLINE_STYLES = ['font-family', 'font-size', 'color', 'font-weight', 'font-style', 'text-decoration'] as const
+const LEGACY_FONT_SIZES = ['6pt', '7.5pt', '10pt', '12pt', '14pt', '18pt', '24pt']
+// Set while ProseMirror parses HTML copied from outside the editor. Internal
+// copies carry data-pm-slice and keep their original open boundaries.
+let pastedExternalHTML = false
+function inlinePastedStyles(html: string): string {
+  if (!html) return html
+  if (html.includes('data-pm-slice')) { pastedExternalHTML = false; return html }
+  pastedExternalHTML = true
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  const walk = (node: globalThis.Node, inherited: Record<string, string>, skipFontSize: boolean) => {
+    if (node.nodeType === 3) {
+      if (!node.textContent?.trim() || !Object.keys(inherited).length) return
+      const span = doc.createElement('span')
+      span.setAttribute('style', Object.entries(inherited).map(([key, value]) => `${key}:${value}`).join(';'))
+      span.textContent = node.textContent
+      node.parentNode?.replaceChild(span, node)
+      return
+    }
+    if (node.nodeType !== 1) return
+    const element = node as HTMLElement
+    if (element.tagName === 'SCRIPT' || element.tagName === 'STYLE') { element.remove(); return }
+    const inHeading = skipFontSize || /^H[1-6]$/.test(element.tagName)
+    const next = { ...inherited }
+    // Inherited sizes would override the heading's own em based size.
+    if (inHeading) delete next['font-size']
+    for (const prop of PASTED_INLINE_STYLES) {
+      // Headings already have their own size in the editor; copying it would
+      // multiply (e.g. 2em inside an h1) or shrink the heading.
+      if (prop === 'font-size' && inHeading) continue
+      const value = element.style.getPropertyValue(prop)
+      if (value) next[prop] = value
+    }
+    if (element.tagName === 'FONT') {
+      const face = element.getAttribute('face')
+      const color = element.getAttribute('color')
+      const size = Number(element.getAttribute('size'))
+      if (face) next['font-family'] = face
+      if (color) next['color'] = color
+      if (!inHeading && size >= 1 && size <= 7) next['font-size'] = LEGACY_FONT_SIZES[size - 1]
+    }
+    Array.from(element.childNodes).forEach(child => walk(child, next, inHeading))
+  }
+  if (doc.body) walk(doc.body, {}, false)
+  return doc.body?.innerHTML ?? html
+}
 const LINK_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:'])
 function resolveLinkUrl(href: string | null | undefined): string | undefined {
   const raw = String(href ?? '').trim()
@@ -1126,6 +1176,20 @@ export default function App() {
       TableRow, TableHeader, TableCell, Subscript, Superscript],
     content: STARTER, editorProps: {
       attributes: { class: 'document-editor', spellcheck: 'true' },
+      transformPastedHTML: inlinePastedStyles,
+      transformPasted: (slice, _view, asText) => {
+        const external = pastedExternalHTML
+        pastedExternalHTML = false
+        const first = slice.content.firstChild
+        if (asText || !external || !first?.isBlock) return slice
+        // A lone paragraph can merge with the surrounding text, but pasting
+        // headings, lists, tables or several blocks should keep their block
+        // boundaries instead of flattening the first/last block into the
+        // paragraph at the cursor.
+        if (slice.content.childCount === 1 && first.type.name === 'paragraph') return slice
+        const SliceType = slice.constructor as new (content: typeof slice.content, openStart: number, openEnd: number) => typeof slice
+        return new SliceType(slice.content, 0, 0)
+      },
       handleKeyDown: (view, event) => {
         if (event.key !== 'Tab' || event.shiftKey) return false
         const { $from } = view.state.selection
@@ -1334,11 +1398,20 @@ export default function App() {
   }
   const pasteIntoEditor = async () => {
     if (!editor) return
+    const insertText = (text: string) => { if (text) editor.chain().focus().insertContent({ type: 'text', text }).run() }
     try {
-      const text = await navigator.clipboard.readText()
-      if (text) editor.chain().focus().insertContent({ type: 'text', text }).run()
+      const items = await navigator.clipboard.read()
+      let html = ''
+      let text = ''
+      for (const item of items) {
+        if (!html && item.types.includes('text/html')) html = await (await item.getType('text/html')).text()
+        if (!text && item.types.includes('text/plain')) text = await (await item.getType('text/plain')).text()
+      }
+      if (html) editor.chain().focus().insertContent(inlinePastedStyles(html)).run()
+      else insertText(text)
     } catch {
-      setStatus('O navegador bloqueou a área de transferência. Use Ctrl+V ou ⌘+V.')
+      try { insertText(await navigator.clipboard.readText()) }
+      catch { setStatus('O navegador bloqueou a área de transferência. Use Ctrl+V ou ⌘+V.') }
     }
   }
   const openEditorContextMenu = (event: React.MouseEvent<HTMLElement>) => {
