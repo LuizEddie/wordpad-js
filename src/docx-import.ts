@@ -75,14 +75,16 @@ export async function convertDocxToEditableHtml(file: File): Promise<string> {
     const dimensions = `${width ? `width="${width}"` : ''} ${height ? `height="${height}"` : ''}`
     return `<img src="data:${escape(mime)};base64,${base64}" alt="${escape(docPr?.getAttribute('descr') || docPr?.getAttribute('name') || 'Imagem')}" ${dimensions} />`
   }
-  const runHtml = async (run: Element): Promise<string> => {
+  const runHtml = async (run: Element, skipFontSize = false): Promise<string> => {
     const properties = child(run, 'rPr')
     const css: string[] = []
     const fonts = child(properties || run, 'rFonts')
     const font = attr(fonts, 'ascii') || attr(fonts, 'hAnsi')
     if (font) css.push(`font-family:${escape(font.replace(/[^\w\s,.-]/g, ''))}`)
     const size = attr(child(properties || run, 'sz'), 'val')
-    if (size) css.push(`font-size:${Number(size) / 2}pt`)
+    // Heading sizes come from the h1-h6 rules, so an explicit run size (which
+    // our own export writes) would freeze the heading and hide level changes.
+    if (size && !skipFontSize) css.push(`font-size:${Number(size) / 2}pt`)
     const color = attr(child(properties || run, 'color'), 'val')
     if (/^[\da-f]{6}$/i.test(color)) css.push(`color:#${color}`)
     const highlight = attr(child(properties || run, 'highlight'), 'val')
@@ -112,7 +114,11 @@ export async function convertDocxToEditableHtml(file: File): Promise<string> {
     const properties = child(paragraph, 'pPr')
     const styleId = attr(child(properties || paragraph, 'pStyle'), 'val')
     const styleName = (styleNames.get(styleId) || styleId).toLowerCase()
-    const heading = /heading\s*1|heading1|title/.test(styleName) ? 1 : /heading\s*[2-6]|heading[2-6]|subtitle/.test(styleName) ? 2 : 0
+    // Keep the original outline level instead of collapsing every level into
+    // Heading 2. Word's style ids are English even in translated installs, but
+    // the display names can be localised (e.g. "Título 3").
+    const headingMatch = styleName.match(/(?:heading|t[íi]?tulo)\s*([1-6])/)
+    const heading = headingMatch ? Number(headingMatch[1]) : /(?:^|\s)title\b/.test(styleName) ? 1 : /(?:^|\s)subtitle\b/.test(styleName) ? 2 : 0
     const css: string[] = []
     const alignment = attr(child(properties || paragraph, 'jc'), 'val')
     if (['left', 'center', 'right', 'start', 'end'].includes(alignment) || alignment === 'both') css.push(`text-align:${alignment === 'both' ? 'justify' : alignment}`)
@@ -134,12 +140,12 @@ export async function convertDocxToEditableHtml(file: File): Promise<string> {
     const keepPageBreak = !!child(properties || paragraph, 'pageBreakBefore')
     let content = ''
     for (const item of children(paragraph)) {
-      if (item.localName === 'r') content += await runHtml(item)
+      if (item.localName === 'r') content += await runHtml(item, heading > 0)
       else if (item.localName === 'hyperlink') {
         const id = relationId(item)
         const rel = relationships.get(id)
         const href = rel?.target || (item.getAttribute('w:anchor') ? `#${item.getAttribute('w:anchor')}` : '')
-        const label = (await Promise.all(children(item).filter(run => run.localName === 'r').map(runHtml))).join('')
+        const label = (await Promise.all(children(item).filter(run => run.localName === 'r').map(run => runHtml(run, heading > 0)))).join('')
         content += href ? `<a href="${escape(href)}">${label}</a>` : label
       }
     }

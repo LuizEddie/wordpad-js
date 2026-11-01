@@ -156,7 +156,7 @@ const DOCX_LIST_HANGING_TWIPS = 300
 const DOCX_MAX_LIST_LEVEL = 8
 const DOCX_BULLET_MARKERS = ['•', '◦', '▪']
 
-type DocxRunStyle = { bold?: boolean; size?: number; color?: string; font?: string }
+type DocxRunStyle = { bold?: boolean; italics?: boolean; size?: number; color?: string; font?: string }
 type DocxListContext = { kind: 'bullet' | 'number'; level: number; definition: NumberingDefinition }
 type DocxBlockContext = { list?: DocxListContext; run?: DocxRunStyle; indentLeft?: number; quote?: boolean; quoteFirst?: boolean; listEnd?: boolean; listContinues?: boolean }
 type DocxExportState = { nextListId: number }
@@ -191,7 +191,12 @@ function maxRunPt(nodes: EditorNode[] = [], fallback = DOCX_BASE_PT): number {
   }, fallback)
 }
 
-function headingSizePt(level: number) { return level <= 1 ? 24 : level === 2 ? 18 : DOCX_BASE_PT }
+// Matches the sizes in style.css (.document-editor h1-h6). Keeping both in
+// sync makes the caret's font-size field and the DOCX export agree with what
+// the page actually paints.
+function headingSizePt(level: number) {
+  return level <= 1 ? 24 : level === 2 ? 18 : level === 3 ? 14 : level === 4 ? 12 : level === 5 ? 11 : 10
+}
 function parseFontSizePt(value: unknown, basePt = DOCX_BASE_PT): number | undefined {
   const text = String(value ?? '').trim().toLowerCase()
   const num = Number.parseFloat(text)
@@ -314,7 +319,10 @@ function headingLineHeight(level: number) { return level <= 1 ? 1.2 : DOCX_LINE_
 function headingGap(level: number) {
   if (level <= 1) return { before: 96, after: 312 } // .2em / .65em of 24pt
   if (level === 2) return { before: 144, after: 216 } // .4em / .6em of 18pt
-  return { before: 0, after: 0 } // Tailwind preflight resets h3-h6
+  if (level === 3) return { before: 140, after: 112 } // .5em / .4em of 14pt
+  if (level === 4) return { before: 132, after: 96 } // .55em / .4em of 12pt
+  if (level === 5) return { before: 132, after: 88 } // .6em / .4em of 11pt
+  return { before: 130, after: 80 } // .65em / .4em of 10pt
 }
 function exactLine(fontPt: number, multiplier: number) { return Math.round(multiplier * fontPt * DOCX_PT_TO_TWIPS) }
 
@@ -381,7 +389,7 @@ function inlineRuns(nodes: EditorNode[] = [], base: DocxRunStyle = {}): Paragrap
     const font = typeof style.fontFamily === 'string' ? style.fontFamily.replaceAll('"', '') : base.font
     // Only write marks that exist: an explicit bold=false would also cancel bold
     // inherited from heading or table-header styles.
-    const textRun = new TextRun({ text: node.text || '', bold: mark('bold') ? true : base.bold, italics: mark('italic') ? true : undefined, underline: mark('underline') || href ? {} : undefined, strike: mark('strike') ? true : undefined, subScript: mark('subscript') ? true : undefined, superScript: mark('superscript') ? true : undefined, color, shading: highlightHex ? { fill: highlightHex } : undefined, size, font })
+    const textRun = new TextRun({ text: node.text || '', bold: mark('bold') ? true : base.bold, italics: mark('italic') ? true : base.italics, underline: mark('underline') || href ? {} : undefined, strike: mark('strike') ? true : undefined, subScript: mark('subscript') ? true : undefined, superScript: mark('superscript') ? true : undefined, color, shading: highlightHex ? { fill: highlightHex } : undefined, size, font })
     return href ? [new ExternalHyperlink({ link: String(href), children: [textRun] })] : [textRun]
   })
 }
@@ -502,7 +510,10 @@ function docxBlocks(node: EditorNode, context: DocxBlockContext = {}, state: Doc
     const indentLeft = marginLeft + (context.indentLeft || 0) + (isCode ? 180 : 0)
     const indentRight = marginRight + (isCode ? 180 : 0)
     const headingStyle = headingLevel === 1 ? HeadingLevel.HEADING_1 : headingLevel === 2 ? HeadingLevel.HEADING_2 : headingLevel === 3 ? HeadingLevel.HEADING_3 : headingLevel === 4 ? HeadingLevel.HEADING_4 : headingLevel === 5 ? HeadingLevel.HEADING_5 : headingLevel === 6 ? HeadingLevel.HEADING_6 : undefined
-    const runStyle: DocxRunStyle = { ...(context.run || {}), ...(headingLevel ? { size: Math.round(basePt * 2), bold: false } : {}), ...(isCode ? { font: 'Courier New' } : {}) }
+    // Headings are bold in the editor (style.css). Word's built-in Heading 4
+    // style is italic by default, so italics is explicitly cleared to keep the
+    // file identical to the page.
+    const runStyle: DocxRunStyle = { ...(context.run || {}), ...(headingLevel ? { size: Math.round(basePt * 2), bold: true, italics: false } : {}), ...(isCode ? { font: 'Courier New' } : {}) }
     return [new Paragraph({
       children: inlineRuns(content, runStyle),
       alignment,
@@ -951,10 +962,34 @@ function paginateDocument(editor: Editor, pageHeight: number, pageWidth: number,
       }
     }
     if (startsNewPage) {
-      const marginTop = dom instanceof HTMLElement ? Number.parseFloat(getComputedStyle(dom).marginTop) || 0 : 0
-      const blockTop = dom instanceof HTMLElement ? dom.getBoundingClientRect().top : articleTop
-      insertions.push({ pos, height: pageBreakHeightToPage(articleTop, pitch, topMargin, blockTop, marginTop, 0, pendingShiftBefore(pos)) })
-      used = 0; pages++
+      // Keep a heading with the block it introduces (Word's keepNext). Without
+      // this, a paragraph that does not fit in the last few lines of a page
+      // moves alone, leaving the heading stranded at the bottom.
+      const previousNode = pos > 0 ? state.doc.resolve(pos).nodeBefore : null
+      const previousDom = index > 0 ? editor.view.dom.children[index - 1] : null
+      const previousIsHeading = previousNode?.type.name === 'heading' && previousDom instanceof HTMLElement
+      let breakPos = pos
+      let breakDom = dom
+      let movedHeadingHeight = 0
+      if (previousIsHeading) {
+        const headingStyle = getComputedStyle(previousDom)
+        const headingHeight =
+          previousDom.getBoundingClientRect().height +
+          (Number.parseFloat(headingStyle.marginTop) || 0) +
+          (Number.parseFloat(headingStyle.marginBottom) || 0)
+        const alreadyBrokenBeforeHeading = insertions.some(item => item.pos === pos - previousNode.nodeSize)
+        // Do not move a heading that already starts the page: the break would
+        // leave an empty sheet behind it.
+        if (!alreadyBrokenBeforeHeading && used > headingHeight + 1) {
+          breakPos = pos - previousNode.nodeSize
+          breakDom = previousDom
+          movedHeadingHeight = headingHeight
+        }
+      }
+      const marginTop = breakDom instanceof HTMLElement ? Number.parseFloat(getComputedStyle(breakDom).marginTop) || 0 : 0
+      const blockTop = breakDom.getBoundingClientRect().top
+      insertions.push({ pos: breakPos, height: pageBreakHeightToPage(articleTop, pitch, topMargin, blockTop, marginTop, 0, pendingShiftBefore(breakPos)) })
+      used = movedHeadingHeight; pages++
     }
     used += blockHeight
     if (used > usable) { const total = used; pages += Math.ceil(total / usable) - 1; used = total % usable || usable }
@@ -1516,6 +1551,28 @@ export default function App() {
   const ContextItem = ({ label, icon, action, disabled = false, active = false }: { label: string; icon: React.ReactNode; action: () => void; disabled?: boolean; active?: boolean }) => <button type="button" role="menuitem" className={`context-menu-item ${active ? 'active' : ''}`} disabled={disabled} onMouseDown={event => event.preventDefault()} onClick={() => { action(); setContextMenu(null) }}>{icon}<span>{label}</span></button>
   const fontFamily = (family: string) => editor.chain().focus().setFontFamily(family).run()
   const fontFamilyValue = parseFontFamily(editor.getAttributes('textStyle').fontFamily)
+  const blockStyleValue = editor.isActive('heading')
+    ? `h${Math.min(6, Math.max(1, Math.round(Number(editor.getAttributes('heading').level) || 1)))}`
+    : 'p'
+  // Titles carry their own size. Explicit sizes from pasted text or imported
+  // files would otherwise override the h1-h6 CSS and hide level changes.
+  const setHeading = (level: 1 | 2 | 3 | 4 | 5 | 6) => {
+    editor.chain().focus().command(({ tr, state }) => {
+      const { $from, from, to, empty } = state.selection
+      if (empty && !$from.parent.isTextblock) return true
+      const start = empty ? $from.start() : from
+      const end = empty ? $from.end() : to
+      state.doc.nodesBetween(start, end, (node, pos) => {
+        if (!node.isText) return
+        const mark = node.marks.find(item => item.type.name === 'textStyle' && item.attrs.fontSize)
+        if (!mark) return
+        const attrs = Object.fromEntries(Object.entries(mark.attrs).filter(([key, value]) => key !== 'fontSize' && value != null))
+        tr.removeMark(pos, pos + node.nodeSize, mark.type)
+        if (Object.keys(attrs).length) tr.addMark(pos, pos + node.nodeSize, mark.type.create(attrs))
+      })
+      return true
+    }).toggleHeading({ level }).run()
+  }
   const setFontSize = (size: string, focusEditor = true) => {
     const chain = editor.chain()
     return (focusEditor ? chain.focus() : chain).setMark('textStyle', { fontSize: `${size}pt` }).run()
@@ -1639,7 +1696,7 @@ export default function App() {
   const inTable = editor.isActive('table')
   const toolbar = <div className="tools">
     <div className="group"><Tool label="Desfazer" action={() => editor.chain().focus().undo().run()}><Undo2 /></Tool><Tool label="Refazer" action={() => editor.chain().focus().redo().run()}><Redo2 /></Tool></div><i />
-    <select aria-label="Estilo do parágrafo" value={editor.isActive('heading', { level: 1 }) ? 'h1' : editor.isActive('heading', { level: 2 }) ? 'h2' : 'p'} onChange={e => e.target.value === 'p' ? editor.chain().focus().setParagraph().run() : editor.chain().focus().toggleHeading({ level: e.target.value === 'h1' ? 1 : 2 }).run()}><option value="p">Texto normal</option><option value="h1">Título 1</option><option value="h2">Título 2</option></select>
+    <select aria-label="Estilo do parágrafo" className="paragraph-style-select" value={blockStyleValue} onChange={e => { const value = e.target.value; if (value === 'p') { editor.chain().focus().setParagraph().run(); return } const level = Math.min(6, Math.max(1, Number(value.slice(1)) || 1)) as 1 | 2 | 3 | 4 | 5 | 6; setHeading(level) }}><option value="p">Texto normal</option><option value="h1">Título 1</option><option value="h2">Título 2</option><option value="h3">Título 3</option><option value="h4">Título 4</option><option value="h5">Título 5</option><option value="h6">Título 6</option></select>
     <select aria-label="Fonte" className="font-family-select" value={fontFamilyValue} onChange={e => fontFamily(e.target.value)}>{FONT_GROUPS.map(group => <optgroup key={group.label} label={group.label}>{group.fonts.map(name => <option key={name} value={name}>{name}</option>)}</optgroup>)}{!FONT_GROUPS.some(group => group.fonts.includes(fontFamilyValue)) && <option value={fontFamilyValue}>{fontFamilyValue}</option>}</select>
     <div className="font-size-picker">
       <input ref={fontSizeInput} className="font-size-input" aria-label="Tamanho da fonte" inputMode="decimal" value={fontSizeDisplay} onFocus={event => { setFontSizeDraft(fontSizeValue); event.currentTarget.select() }} onChange={event => setFontSizeDraft(event.target.value)} onBlur={blurFontSizeInput} onKeyDown={fontSizeKeyDown} />
@@ -1783,8 +1840,12 @@ export default function App() {
       <ContextItem label="Remover formatação" icon={<RemoveFormatting />} action={() => editor.chain().focus().unsetAllMarks().clearNodes().run()} />
       <div className="context-menu-separator" />
       <ContextItem label="Texto normal" icon={<Type />} action={() => editor.chain().focus().setParagraph().run()} active={editor.isActive('paragraph')} />
-      <ContextItem label="Título 1" icon={<Type />} action={() => editor.chain().focus().toggleHeading({ level: 1 }).run()} active={editor.isActive('heading', { level: 1 })} />
-      <ContextItem label="Título 2" icon={<Type />} action={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} active={editor.isActive('heading', { level: 2 })} />
+      <ContextItem label="Título 1" icon={<Type />} action={() => setHeading(1)} active={editor.isActive('heading', { level: 1 })} />
+      <ContextItem label="Título 2" icon={<Type />} action={() => setHeading(2)} active={editor.isActive('heading', { level: 2 })} />
+      <ContextItem label="Título 3" icon={<Type />} action={() => setHeading(3)} active={editor.isActive('heading', { level: 3 })} />
+      <ContextItem label="Título 4" icon={<Type />} action={() => setHeading(4)} active={editor.isActive('heading', { level: 4 })} />
+      <ContextItem label="Título 5" icon={<Type />} action={() => setHeading(5)} active={editor.isActive('heading', { level: 5 })} />
+      <ContextItem label="Título 6" icon={<Type />} action={() => setHeading(6)} active={editor.isActive('heading', { level: 6 })} />
       <ContextItem label="Lista com marcadores" icon={<List />} action={() => editor.chain().focus().toggleBulletList().run()} active={editor.isActive('bulletList')} />
       <ContextItem label="Lista numerada" icon={<ListOrdered />} action={() => editor.chain().focus().toggleOrderedList().run()} active={editor.isActive('orderedList')} />
       <ContextItem label="Citação" icon={<Quote />} action={() => editor.chain().focus().toggleBlockquote().run()} active={editor.isActive('blockquote')} />
