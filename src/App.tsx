@@ -134,7 +134,7 @@ const DOCX_BULLET_MARKERS = ['•', '◦', '▪']
 
 type DocxRunStyle = { bold?: boolean; size?: number; color?: string; font?: string }
 type DocxListContext = { kind: 'bullet' | 'number'; level: number; definition: NumberingDefinition }
-type DocxBlockContext = { list?: DocxListContext; run?: DocxRunStyle; indentLeft?: number; quote?: boolean; quoteFirst?: boolean; listEnd?: boolean }
+type DocxBlockContext = { list?: DocxListContext; run?: DocxRunStyle; indentLeft?: number; quote?: boolean; quoteFirst?: boolean; listEnd?: boolean; listContinues?: boolean }
 type DocxExportState = { nextListId: number }
 
 function cssLengthToTwips(value: unknown, emPt = DOCX_BASE_PT): number | undefined {
@@ -253,7 +253,13 @@ function docxBlocks(node: EditorNode, context: DocxBlockContext = {}, state: Doc
     const start = Math.max(1, Math.round(Number(node.attrs?.start) || 1))
     const definition = kind === 'bullet' ? bulletNumbering() : orderedNumbering(`wordpad-numbers-${state.nextListId++}`, start)
     const endsOuterList = outermost || Boolean(context.listEnd)
-    return content.flatMap((item, index) => docxBlocks(item, { ...context, list: { kind, level, definition }, listEnd: endsOuterList && index === content.length - 1 }, state))
+    // A list that is immediately followed by another list of the same kind is a
+    // single visual list in the editor, even when it is stored as two nodes
+    // (pagination splits a list and a later reflow can drop the break between
+    // the chunks). Its last item must not carry the 1em bottom margin, or the
+    // DOCX shows a gap in the middle of the list.
+    const continues = outermost ? Boolean(context.listContinues) : false
+    return content.flatMap((item, index) => docxBlocks(item, { ...context, listContinues: continues, list: { kind, level, definition }, listEnd: endsOuterList && index === content.length - 1 }, state))
   }
   if (node.type === 'listItem') {
     const continuation = Boolean(node.attrs?.paginationContinuation)
@@ -266,7 +272,7 @@ function docxBlocks(node: EditorNode, context: DocxBlockContext = {}, state: Doc
       const fontPt = Math.max(DOCX_BASE_PT, maxRunPt(item.content))
       // The browser gives list containers a 1em bottom margin but no gap
       // between items, so only the last item of the outermost list carries it.
-      const spacing = { before: 0, after: context.listEnd && last ? 240 : 0, line: exactLine(fontPt, DOCX_LINE_HEIGHT), lineRule: LineRuleType.EXACT }
+      const spacing = { before: 0, after: context.listEnd && last && !context.listContinues ? 240 : 0, line: exactLine(fontPt, DOCX_LINE_HEIGHT), lineRule: LineRuleType.EXACT }
       const indent = list ? listLevelIndent(list.level) : undefined
       const left = (indent?.left || 0) + quoteIndent
       // Only the first paragraph of an item carries the marker; following
@@ -345,6 +351,11 @@ function docxBlocks(node: EditorNode, context: DocxBlockContext = {}, state: Doc
       alignment,
       indent: { left: indentLeft || undefined, right: indentRight || undefined, firstLine: textIndent && textIndent > 0 ? textIndent : undefined, hanging: textIndent && textIndent < 0 ? Math.abs(textIndent) : undefined },
       heading: headingStyle,
+      // A heading must not be left alone at the bottom of a page: Word and
+      // LibreOffice repaginate with their own font metrics and can push the
+      // heading to the next sheet while an explicit break before the following
+      // block pushes the content one sheet further, leaving a blank page.
+      keepNext: headingLevel ? true : undefined,
       spacing: { before: cssTwips('margin-top') ?? defaultBefore, after: cssTwips('margin-bottom') ?? defaultAfter, line: cssLineHeightToTwips(css['line-height'], fontPt) ?? defaultLine, lineRule: LineRuleType.EXACT },
       shading: isCode ? { fill: 'F2F4F7' } : undefined,
       // Borders in the shading colour reproduce the 12px padding of the
@@ -418,6 +429,55 @@ function pageBreakHeightToPage(articleTop: number, pitch: number, topMargin: num
   return Math.max(PAGE_GAP, targetY - boundaryY - priorBreakHeight)
 }
 
+// Pagination stores a list that crosses a page as two list nodes. When the
+// break between them disappears they must be joined again: the container's 1em
+// bottom margin would otherwise be rendered (and exported as `after: 240`) in
+// the middle of the list. A deliberate numbering restart keeps them apart.
+function isListContinuation(previous: { type: string; start: number; count: number }, node: { type: string; start: number; firstItemContinues: boolean }): boolean {
+  if (node.type === 'bulletList') return true
+  if (node.type !== 'orderedList') return false
+  // A split in the middle of an item repeats that item's number, so the
+  // continuation starts one below the natural next number.
+  return node.start === previous.start + previous.count - (node.firstItemContinues ? 1 : 0)
+}
+function listChunkOfNode(node: { type: { name: string }; attrs?: { [key: string]: unknown }; childCount: number; child: (index: number) => { attrs?: { [key: string]: unknown } } }) {
+  return {
+    type: node.type.name,
+    start: Number(node.attrs?.start) || 1,
+    count: node.childCount,
+    firstItemContinues: Boolean(node.child(0)?.attrs?.paginationContinuation),
+  }
+}
+function listChunkOfJson(node: EditorNode) {
+  return {
+    type: node.type || '',
+    start: Number(node.attrs?.start) || 1,
+    count: node.content?.length || 0,
+    firstItemContinues: Boolean(node.content?.[0]?.attrs?.paginationContinuation),
+  }
+}
+// Boundaries between two adjacent chunks of the same list, collected in
+// document order.
+function adjacentListJoins(doc: Editor['state']['doc']): number[] {
+  const joins: number[] = []
+  doc.forEach((node, offset) => {
+    if (node.type.name !== 'bulletList' && node.type.name !== 'orderedList') return
+    const previous = doc.resolve(offset).nodeBefore
+    if (!previous || previous.type !== node.type) return
+    if (!isListContinuation(listChunkOfNode(previous), listChunkOfNode(node))) return
+    joins.push(offset)
+  })
+  return joins
+}
+// A page break is exported as `pageBreakBefore` on the next block. Look past it
+// when deciding whether the following list belongs to the same visual list.
+function nextContentBlock(blocks: EditorNode[], index: number): EditorNode | undefined {
+  for (let next = index + 1; next < blocks.length; next++) {
+    if (blocks[next].type !== 'pageBreak') return blocks[next]
+  }
+  return undefined
+}
+
 function paginateDocument(editor: Editor, pageHeight: number, pageWidth: number, topMargin: number, rightMargin: number, bottomMargin: number, leftMargin: number, paginating: { current: boolean }, requestReflow: () => void): number {
   const automatic = editor.state.schema.nodes.pageBreak
   if (!automatic) return 1
@@ -426,9 +486,25 @@ function paginateDocument(editor: Editor, pageHeight: number, pageWidth: number,
   // Adding one here places a break inside the preceding block and causes text to
   // flow into the visual page gap instead of starting on the next sheet.
   editor.state.doc.forEach((node, offset) => { if (node.type === automatic && node.attrs.automatic) oldAuto.push({ pos: offset, size: node.nodeSize }) })
-  if (oldAuto.length) {
+  // A list split by an earlier pass is stored as two adjacent list nodes. While
+  // the automatic break between the chunks exists they must stay apart (that is
+  // how each pass advances to the next page). Once a reflow drops the break the
+  // chunks stay adjacent, and the editor renders the container's 1em bottom
+  // margin in the middle of the list (the DOCX mirrors it as `after: 240`).
+  // Join only chunks that are already adjacent, i.e. no break between them.
+  const listJoins = adjacentListJoins(editor.state.doc)
+  if (oldAuto.length || listJoins.length) {
     let tr = editor.state.tr
-    for (const item of oldAuto.reverse()) tr = tr.delete(item.pos, item.pos + item.size)
+    for (const item of [...oldAuto].reverse()) tr = tr.delete(item.pos, item.pos + item.size)
+    // Deleting the breaks above shifts the boundaries collected from the
+    // original document, so map them before joining (highest position first so
+    // the lower ones stay valid).
+    const joinPositions = listJoins.map(pos => tr.mapping.map(pos, 1)).sort((a, b) => b - a)
+    for (const pos of joinPositions) {
+      const $pos = tr.doc.resolve(pos)
+      if (!$pos.nodeBefore || !$pos.nodeAfter || $pos.nodeBefore.type !== $pos.nodeAfter.type) continue
+      tr = tr.join(pos)
+    }
     tr.setMeta('addToHistory', false)
     paginating.current = true
     try { editor.view.dispatch(tr) } finally { paginating.current = false }
@@ -781,6 +857,18 @@ function paginateDocument(editor: Editor, pageHeight: number, pageWidth: number,
     try { editor.view.dispatch(tr) } finally { paginating.current = false }
     if (imageUpdates.length || splits.length || listSplits.length || listTextSplits.length) requestReflow()
   }
+  // A pass that drops a break between two chunks of the same list leaves them
+  // adjacent. Join them and re-measure so the container margin is not rendered
+  // (nor exported) in the middle of the list.
+  const adjacent = adjacentListJoins(editor.state.doc)
+  if (adjacent.length) {
+    let joinTr = editor.state.tr
+    for (const pos of adjacent.reverse()) joinTr = joinTr.join(pos)
+    joinTr.setMeta('addToHistory', false)
+    paginating.current = true
+    try { editor.view.dispatch(joinTr) } finally { paginating.current = false }
+    requestReflow()
+  }
   return pages
 }
 
@@ -1118,12 +1206,38 @@ export default function App() {
     // A page break is applied to the following paragraph so the exported file
     // does not gain an empty paragraph at the top of the new page.
     let breakBefore = false
-    for (const block of blocks) {
-      if (block.type === 'pageBreak') { breakBefore = true; continue }
-      for (const child of docxBlocks(block, {}, state)) {
+    let lastWasHeading = false
+    for (let index = 0; index < blocks.length; index++) {
+      const block = blocks[index]
+      if (block.type === 'pageBreak') {
+        // Automatic breaks come from the editor's own pagination, measured with
+        // browser font metrics. Word/LibreOffice paginate the same content their
+        // own way, so baking those breaks in makes small metric differences turn
+        // into blank pages (a heading or a single list item stranded alone).
+        // Only breaks the user inserted are preserved.
+        if (block.attrs?.automatic) continue
+        // Keep a heading with the content it introduces. A manual break right
+        // after a heading is moved to the heading itself; otherwise Word and
+        // LibreOffice can push the heading to its own page and the original
+        // break leaves a blank page behind.
+        const lastChild = children[children.length - 1]
+        if (lastWasHeading && children.length > 1 && lastChild instanceof Paragraph) children[children.length - 1] = lastChild.with({ pageBreakBefore: true })
+        else breakBefore = true
+        lastWasHeading = false
+        continue
+      }
+      const next = nextContentBlock(blocks, index)
+      // Same-kind lists are one visual list unless an ordered list restarts its
+      // numbering; only then must the trailing margin stay between them. Page
+      // breaks are skipped because the list can continue on the next page.
+      const listContinues = Boolean(next) && next?.type === block.type &&
+        (block.type === 'bulletList' || block.type === 'orderedList') &&
+        isListContinuation(listChunkOfJson(block), listChunkOfJson(next as EditorNode))
+      for (const child of docxBlocks(block, { listContinues }, state)) {
         if (breakBefore && child instanceof Paragraph) { children.push(child.with({ pageBreakBefore: true })); breakBefore = false }
         else children.push(child)
       }
+      lastWasHeading = block.type === 'heading'
     }
     if (breakBefore) children.push(new Paragraph({ pageBreakBefore: true }))
     if (!children.length) children.push(new Paragraph({}))
