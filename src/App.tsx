@@ -50,6 +50,26 @@ const DOCX_STYLE_MAP = [
 ]
 const PAGE_GAP = 24
 const FONT_COLORS = ['#202124', '#5f6368', '#d93025', '#ea4335', '#f29900', '#fbbc04', '#188038', '#34a853', '#007b83', '#12a5a5', '#1a73e8', '#4285f4', '#174ea6', '#673ab7', '#a142f4', '#c5221f']
+// Only fonts that ship with common desktop/mobile systems are listed: the app
+// is fully offline, so webfonts would fall back silently or require a CDN.
+const FONT_GROUPS: { label: string; fonts: string[] }[] = [
+  { label: 'Sem serifa', fonts: ['Arial', 'Helvetica', 'Verdana', 'Tahoma', 'Trebuchet MS', 'Calibri', 'Segoe UI', 'Roboto', 'Noto Sans', 'Liberation Sans'] },
+  { label: 'Com serifa', fonts: ['Times New Roman', 'Georgia', 'Cambria', 'Garamond', 'Palatino Linotype', 'Book Antiqua', 'Liberation Serif', 'DejaVu Serif'] },
+  { label: 'Monoespaçada', fonts: ['Courier New', 'Consolas', 'Lucida Console', 'Menlo', 'Monaco', 'Liberation Mono', 'DejaVu Sans Mono'] },
+  { label: 'Display', fonts: ['Impact', 'Comic Sans MS'] },
+]
+const DEFAULT_FONT_FAMILY = 'Arial'
+// Shortcuts in the size menu; the field itself accepts any value in the range.
+const FONT_SIZE_PRESETS = ['8', '9', '10', '11', '12', '14', '16', '18', '20', '24', '28', '36', '48', '72']
+const FONT_SIZE_MIN = 1
+const FONT_SIZE_MAX = 400
+function parseFontSizeInput(value: string): number | null {
+  const text = value.trim().toLowerCase().replace(',', '.').replace(/\s*pt$/, '')
+  if (!/^\d*\.?\d+$/.test(text)) return null
+  const size = Number.parseFloat(text)
+  if (!Number.isFinite(size) || size <= 0) return null
+  return Number(Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, size)).toFixed(1))
+}
 const readDocs = (): SavedDoc[] => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]') as SavedDoc[] } catch { return [] } }
 function normalizeDocxColor(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
@@ -175,6 +195,12 @@ function parseFontSizePt(value: unknown, basePt = DOCX_BASE_PT): number | undefi
   if (text.endsWith('px')) return num * 0.75
   if (text.endsWith('em') || text.endsWith('rem')) return num * basePt
   return num
+}
+// Inline styles may carry quotes or a fallback stack; the picker only needs
+// the first family name.
+function parseFontFamily(value: unknown): string {
+  const first = String(value ?? '').split(',')[0].trim().replace(/^["']+|["']+$/g, '').trim()
+  return first || DEFAULT_FONT_FAMILY
 }
 const LINK_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:'])
 function resolveLinkUrl(href: string | null | undefined): string | undefined {
@@ -1074,11 +1100,18 @@ export default function App() {
   const [spacingMenuPosition, setSpacingMenuPosition] = useState({ top: 0, left: 0 })
   const [spacingDialogOpen, setSpacingDialogOpen] = useState(false)
   const [spacingDraft, setSpacingDraft] = useState({ line: '1.65', before: '0', after: '12' })
+  const [fontSizeMenuOpen, setFontSizeMenuOpen] = useState(false)
+  const [fontSizeMenuPosition, setFontSizeMenuPosition] = useState({ top: 0, left: 0 })
+  // null while the field is not being edited, so it keeps mirroring the caret.
+  const [fontSizeDraft, setFontSizeDraft] = useState<string | null>(null)
   const [tab, setTab] = useState<'home' | 'insert' | 'layout'>('home')
   const [margins, setMargins] = useState<Margins>({ left: 1, right: 1, top: 1, bottom: 1 })
   const fileInput = useRef<HTMLInputElement>(null)
   const imageInput = useRef<HTMLInputElement>(null)
   const fontColorButton = useRef<HTMLButtonElement>(null)
+  const fontSizeInput = useRef<HTMLInputElement>(null)
+  const fontSizeCaret = useRef<HTMLButtonElement>(null)
+  const fontSizeSkipBlur = useRef(false)
   const spacingButton = useRef<HTMLButtonElement>(null)
   const horizontalRuler = useRef<HTMLDivElement>(null)
   const verticalRuler = useRef<HTMLDivElement>(null)
@@ -1146,6 +1179,19 @@ export default function App() {
     document.addEventListener('pointerdown', closeOutside)
     return () => { window.removeEventListener('keydown', closeOnEscape); document.removeEventListener('pointerdown', closeOutside) }
   }, [spacingMenuOpen])
+  useEffect(() => {
+    if (!fontSizeMenuOpen) return
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setFontSizeMenuOpen(false) }
+    const closeOutside = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null
+      if (fontSizeCaret.current?.contains(target) || fontSizeInput.current?.contains(target)) return
+      if (target?.closest?.('.font-size-menu')) return
+      setFontSizeMenuOpen(false)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    document.addEventListener('pointerdown', closeOutside)
+    return () => { window.removeEventListener('keydown', closeOnEscape); document.removeEventListener('pointerdown', closeOutside) }
+  }, [fontSizeMenuOpen])
   useEffect(() => {
     if (!spacingDialogOpen) return
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setSpacingDialogOpen(false) }
@@ -1388,7 +1434,11 @@ export default function App() {
   const Tool = ({ label, action, children, active = false }: { label: string; action: () => void; children: React.ReactNode; active?: boolean }) => <button type="button" title={label} aria-label={label} className={`tool ${active ? 'active' : ''}`} onClick={action}>{children}</button>
   const ContextItem = ({ label, icon, action, disabled = false, active = false }: { label: string; icon: React.ReactNode; action: () => void; disabled?: boolean; active?: boolean }) => <button type="button" role="menuitem" className={`context-menu-item ${active ? 'active' : ''}`} disabled={disabled} onMouseDown={event => event.preventDefault()} onClick={() => { action(); setContextMenu(null) }}>{icon}<span>{label}</span></button>
   const fontFamily = (family: string) => editor.chain().focus().setFontFamily(family).run()
-  const setFontSize = (size: string) => editor.chain().focus().setMark('textStyle', { fontSize: `${size}pt` }).run()
+  const fontFamilyValue = parseFontFamily(editor.getAttributes('textStyle').fontFamily)
+  const setFontSize = (size: string, focusEditor = true) => {
+    const chain = editor.chain()
+    return (focusEditor ? chain.focus() : chain).setMark('textStyle', { fontSize: `${size}pt` }).run()
+  }
   // Mirrors the size used by the caret/selection: the explicit textStyle mark
   // wins; otherwise fall back to the font size the block (heading or body) renders with.
   const cursorHeadingLevel = editor.isActive('heading') ? Number(editor.getAttributes('heading').level) : 0
@@ -1396,7 +1446,39 @@ export default function App() {
   const cursorExplicitPt = parseFontSizePt(editor.getAttributes('textStyle').fontSize, cursorBlockPt)
   const fontSizeAtCursor = cursorExplicitPt ?? cursorBlockPt
   const fontSizeValue = String(Number(fontSizeAtCursor.toFixed(1)))
-  const fontSizeOptions = ['8', '9', '10', '11', '12', '14', '16', '18', '20', '24', '28', '36', '48', '72']
+  // The field mirrors the caret unless the user is typing a new value.
+  const fontSizeDisplay = fontSizeDraft ?? fontSizeValue
+  const fontSizePresetActive = (size: string) => Math.abs(Number(size) - fontSizeAtCursor) < 0.05
+  const commitFontSizeDraft = (focusEditor: boolean) => {
+    if (fontSizeDraft === null) return
+    const size = parseFontSizeInput(fontSizeDraft)
+    setFontSizeDraft(null)
+    // Without a real change there is nothing to apply, and moving focus would
+    // break keyboard navigation out of the field.
+    if (size === null || String(size) === fontSizeValue) return
+    setFontSize(String(size), focusEditor)
+  }
+  const blurFontSizeInput = () => {
+    if (fontSizeSkipBlur.current) { fontSizeSkipBlur.current = false; return }
+    commitFontSizeDraft(false)
+  }
+  const applyFontSizePreset = (size: string) => {
+    // Selecting a shortcut blurs the field; skip that blur so the typed draft
+    // cannot overwrite the preset that was just applied.
+    if (document.activeElement === fontSizeInput.current) fontSizeSkipBlur.current = true
+    setFontSize(size)
+    setFontSizeDraft(null)
+    setFontSizeMenuOpen(false)
+  }
+  const fontSizeKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      fontSizeSkipBlur.current = true
+      commitFontSizeDraft(false)
+      editor.commands.focus()
+    } else if (event.key === 'Escape') { event.preventDefault(); fontSizeSkipBlur.current = true; setFontSizeDraft(null); event.currentTarget.blur() }
+    else if (event.key === 'ArrowDown') { event.preventDefault(); setFontSizeMenuPosition(popupPosition(fontSizeCaret.current, 168)); setFontSizeMenuOpen(true) }
+  }
   // Paragraph spacing follows the selection: a caret edits its own block, a
   // range edits every paragraph/heading it touches.
   const spacingTargets = () => {
@@ -1477,8 +1559,19 @@ export default function App() {
   const toolbar = <div className="tools">
     <div className="group"><Tool label="Desfazer" action={() => editor.chain().focus().undo().run()}><Undo2 /></Tool><Tool label="Refazer" action={() => editor.chain().focus().redo().run()}><Redo2 /></Tool></div><i />
     <select aria-label="Estilo do parágrafo" value={editor.isActive('heading', { level: 1 }) ? 'h1' : editor.isActive('heading', { level: 2 }) ? 'h2' : 'p'} onChange={e => e.target.value === 'p' ? editor.chain().focus().setParagraph().run() : editor.chain().focus().toggleHeading({ level: e.target.value === 'h1' ? 1 : 2 }).run()}><option value="p">Texto normal</option><option value="h1">Título 1</option><option value="h2">Título 2</option></select>
-    <select aria-label="Fonte" defaultValue="Arial" onChange={e => fontFamily(e.target.value)}><option>Arial</option><option>Georgia</option><option>Times New Roman</option><option>Courier New</option><option>Verdana</option><option>Tahoma</option></select>
-    <select aria-label="Tamanho da fonte" value={fontSizeValue} onChange={e => setFontSize(e.target.value)}>{fontSizeOptions.map(size => <option key={size} value={size}>{size} pt</option>)}{!fontSizeOptions.includes(fontSizeValue) && <option value={fontSizeValue}>{fontSizeValue} pt</option>}</select><i />
+    <select aria-label="Fonte" className="font-family-select" value={fontFamilyValue} onChange={e => fontFamily(e.target.value)}>{FONT_GROUPS.map(group => <optgroup key={group.label} label={group.label}>{group.fonts.map(name => <option key={name} value={name}>{name}</option>)}</optgroup>)}{!FONT_GROUPS.some(group => group.fonts.includes(fontFamilyValue)) && <option value={fontFamilyValue}>{fontFamilyValue}</option>}</select>
+    <div className="font-size-picker">
+      <input ref={fontSizeInput} className="font-size-input" aria-label="Tamanho da fonte" inputMode="decimal" value={fontSizeDisplay} onFocus={event => { setFontSizeDraft(fontSizeValue); event.currentTarget.select() }} onChange={event => setFontSizeDraft(event.target.value)} onBlur={blurFontSizeInput} onKeyDown={fontSizeKeyDown} />
+      <button ref={fontSizeCaret} type="button" className="font-size-caret" title="Tamanhos de fonte" aria-label="Escolher tamanho da fonte" aria-haspopup="menu" aria-expanded={fontSizeMenuOpen} onMouseDown={event => event.preventDefault()} onClick={() => { if (!fontSizeMenuOpen) setFontSizeMenuPosition(popupPosition(fontSizeCaret.current, 168)); setFontSizeMenuOpen(open => !open) }}><ChevronDown size={13} /></button>
+      {fontSizeMenuOpen && <div className="font-size-menu" role="menu" aria-label="Tamanhos de fonte" style={fontSizeMenuPosition}>
+        {FONT_SIZE_PRESETS.map(size => {
+          const checked = fontSizePresetActive(size)
+          return <button key={size} type="button" role="menuitemradio" aria-checked={checked} className="font-size-menu-item" onMouseDown={event => event.preventDefault()} onClick={() => applyFontSizePreset(size)}><span>{size} pt</span>{checked && <Check size={15} />}</button>
+        })}
+        <div className="spacing-menu-separator" />
+        <small>Digite qualquer tamanho de 1 a 400 pt.</small>
+      </div>}
+    </div><i />
     <div className="group"><Tool label="Negrito" active={editor.isActive('bold')} action={() => editor.chain().focus().toggleBold().run()}><Bold /></Tool><Tool label="Itálico" active={editor.isActive('italic')} action={() => editor.chain().focus().toggleItalic().run()}><Italic /></Tool><Tool label="Sublinhado" active={editor.isActive('underline')} action={() => editor.chain().focus().toggleUnderline().run()}><UnderlineIcon /></Tool><Tool label="Tachado" active={editor.isActive('strike')} action={() => editor.chain().focus().toggleStrike().run()}><Strikethrough /></Tool><Tool label="Sobrescrito" active={editor.isActive('superscript')} action={() => editor.chain().focus().toggleSuperscript().run()}><SuperscriptIcon /></Tool><Tool label="Subscrito" active={editor.isActive('subscript')} action={() => editor.chain().focus().toggleSubscript().run()}><SubscriptIcon /></Tool></div><i />
     <div className="color-picker"><button ref={fontColorButton} type="button" className="color-tool font-color-button" title="Aplicar cor da fonte" aria-label="Aplicar cor da fonte" onClick={() => applyFontColor(fontColor)}><Type /><span style={{ backgroundColor: fontColor }} /></button><button type="button" className="color-caret" title="Escolher cor da fonte" aria-label="Escolher cor da fonte" onClick={() => { setColorMenuPosition(popupPosition(fontColorButton.current, 210)); setFontPaletteOpen(open => !open) }}><ChevronDown size={13} /></button>{fontPaletteOpen && <div className="color-menu" style={colorMenuPosition}><strong>Cor da fonte</strong><div className="color-swatches">{FONT_COLORS.map(color => <button key={color} type="button" title={color} aria-label={`Cor ${color}`} style={{ backgroundColor: color }} onClick={() => applyFontColor(color)} />)}</div><label>Personalizada<input type="color" value={fontColor} onChange={e => { setFontColor(e.target.value); editor.chain().focus().setColor(e.target.value).run() }} /></label></div>}</div><label className="color-tool" title="Realce"><Highlighter /><input type="color" aria-label="Cor do realce" defaultValue="#fff176" onChange={e => editor.chain().focus().toggleHighlight({ color: e.target.value }).run()} /></label><Tool label="Remover formatação" action={() => editor.chain().focus().unsetAllMarks().clearNodes().run()}><RemoveFormatting /></Tool><i />
     <div className="group"><Tool label="Alinhar à esquerda" active={editor.isActive({ textAlign: 'left' })} action={() => editor.chain().focus().setTextAlign('left').run()}><AlignLeft /></Tool><Tool label="Centralizar" active={editor.isActive({ textAlign: 'center' })} action={() => editor.chain().focus().setTextAlign('center').run()}><AlignCenter /></Tool><Tool label="Alinhar à direita" active={editor.isActive({ textAlign: 'right' })} action={() => editor.chain().focus().setTextAlign('right').run()}><AlignRight /></Tool><Tool label="Justificar" active={editor.isActive({ textAlign: 'justify' })} action={() => editor.chain().focus().setTextAlign('justify').run()}><AlignJustify /></Tool></div><i />

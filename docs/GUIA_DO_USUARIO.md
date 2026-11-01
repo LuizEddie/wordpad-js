@@ -21,7 +21,7 @@ Na guia **Página Inicial** você encontra:
 
 - **Desfazer e refazer:** reverta ou reaplique alterações recentes.
 - **Estilo de parágrafo:** texto normal, Título 1 ou Título 2.
-- **Fonte e tamanho:** escolha a família tipográfica e o tamanho em pontos. O campo de tamanho mostra o tamanho usado no ponto do cursor (ou no início da seleção) e acompanha o estilo do parágrafo: Título 1 aparece como 24 pt e Título 2 como 18 pt.
+- **Fonte e tamanho:** escolha a família tipográfica e o tamanho em pontos. O campo de fonte mostra a família usada no ponto do cursor e o campo de tamanho mostra o tamanho correspondente (ou o início da seleção); o tamanho acompanha o estilo do parágrafo: Título 1 aparece como 24 pt e Título 2 como 18 pt. No campo de tamanho, digite qualquer valor de 1 a 400 pt (vírgula ou ponto para decimais) e confirme com Enter ou saindo do campo; a seta ao lado abre tamanhos predefinidos. A lista de fontes reúne fontes comuns do Windows, macOS, Linux, Android e ChromeOS; a aparência depende das fontes instaladas no dispositivo e o Word pode substituir uma fonte ausente.
 - **Negrito, itálico, sublinhado, tachado, sobrescrito e subscrito.**
 - **Cor da fonte:** clique no ícone de letra para aplicar a cor atual; use a seta para abrir a paleta e escolher uma cor pronta ou personalizada.
 - **Realce:** selecione uma cor para destacar o texto.
