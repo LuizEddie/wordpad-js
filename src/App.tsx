@@ -49,6 +49,10 @@ const DOCX_STYLE_MAP = [
   "p[style-name='Caption'] => p:fresh",
 ]
 const PAGE_GAP = 24
+// Ruler percentages are clamped so an out-of-range margin typed in Layout cannot
+// produce an invalid background gradient or move a handle outside the strip.
+const rulerPercent = (value: number, total: number) => Math.max(0, Math.min(100, (value / total) * 100))
+const labelAtRulerEnd = (inch: number, total: number) => inch / total >= 0.999
 const FONT_COLORS = ['#202124', '#5f6368', '#d93025', '#ea4335', '#f29900', '#fbbc04', '#188038', '#34a853', '#007b83', '#12a5a5', '#1a73e8', '#4285f4', '#174ea6', '#673ab7', '#a142f4', '#c5221f']
 // Only fonts that ship with common desktop/mobile systems are listed: the app
 // is fully offline, so webfonts would fall back silently or require a CDN.
@@ -1303,6 +1307,10 @@ export default function App() {
   const paperHeightInches = paper.height / 25.4
   const pagePitch = paperHeight + PAGE_GAP
   const pageStackHeight = Math.max(paperHeight, pageCount * pagePitch - PAGE_GAP)
+  const horizontalMarginStart = rulerPercent(margins.left, paperWidthInches)
+  const horizontalMarginEnd = Math.max(horizontalMarginStart, 100 - rulerPercent(margins.right, paperWidthInches))
+  const verticalMarginStart = rulerPercent(margins.top, paperHeightInches)
+  const verticalMarginEnd = Math.max(verticalMarginStart, 100 - rulerPercent(margins.bottom, paperHeightInches))
   useEffect(() => {
     if (!editor) return
     const frame = requestAnimationFrame(() => setPageCount(paginateDocument(editor, paperHeight, paperWidth, margins.top * 96, margins.right * 96, margins.bottom * 96, margins.left * 96, paginationInProgress, () => setContentRevision(value => value + 1))))
@@ -1731,17 +1739,17 @@ export default function App() {
       <section>
         <div className="subbar"><button ref={sidebarToggleRef} type="button" className="tool" title="Mostrar/ocultar documentos" aria-label="Mostrar ou ocultar documentos recentes" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(!sidebarOpen)}><Menu /></button>Meus documentos　›　{title}<span>100%</span></div>
         <div className="scroll">
-          <div className="page-layout" style={{ width: paperWidth + 72 }}>
-            <div className="horizontal-ruler" ref={horizontalRuler} style={{ width: paperWidth }} aria-label="Régua horizontal em polegadas">
-              <div className="ruler-scale" />
-              {Array.from({ length: Math.floor(paperWidthInches) + 1 }, (_, inch) => <span key={inch} className="ruler-number" style={{ left: `${inch / paperWidthInches * 100}%` }}>{inch}</span>)}
-              {(['left', 'right'] as const).map(side => <button key={side} className={`ruler-handle ${side}`} title={`Arraste para ajustar margem ${side === 'left' ? 'esquerda' : 'direita'}: ${margins[side]} pol.`} style={{ left: `${(side === 'left' ? margins.left : paperWidthInches - margins.right) / paperWidthInches * 100}%` }} onPointerDown={event => adjustMargin('horizontal', side, event)}><span /></button>)}
+          <div className="page-layout" style={{ width: `calc(${paperWidth}px + 2 * var(--ruler-size))` }}>
+            <div className="horizontal-ruler" ref={horizontalRuler} role="group" aria-label="Régua horizontal em polegadas" style={{ width: paperWidth, '--margin-start': `${horizontalMarginStart}%`, '--margin-end': `${horizontalMarginEnd}%` } as React.CSSProperties}>
+              <div className="ruler-scale" aria-hidden="true" />
+              {Array.from({ length: Math.floor(paperWidthInches) + 1 }, (_, inch) => <span key={inch} aria-hidden="true" className={`ruler-number${inch === 0 ? ' edge-start' : ''}${labelAtRulerEnd(inch, paperWidthInches) ? ' edge-end' : ''}`} style={{ left: `${inch / paperWidthInches * 100}%` }}>{inch}</span>)}
+              {(['left', 'right'] as const).map(side => <button key={side} type="button" className={`ruler-handle ${side}`} aria-label={`Ajustar margem ${side === 'left' ? 'esquerda' : 'direita'}: ${margins[side]} polegadas`} title={`Arraste para ajustar margem ${side === 'left' ? 'esquerda' : 'direita'}: ${margins[side]} pol.`} style={{ left: `${rulerPercent(side === 'left' ? margins.left : paperWidthInches - margins.right, paperWidthInches)}%` }} onPointerDown={event => adjustMargin('horizontal', side, event)}><span aria-hidden="true" /></button>)}
             </div>
             <div className="page-row">
-              <div className="vertical-ruler" ref={verticalRuler} style={{ height: paperHeight }} aria-label="Régua vertical em polegadas">
-                <div className="vertical-scale" />
-                {Array.from({ length: Math.floor(paperHeightInches) + 1 }, (_, inch) => <span key={inch} className="ruler-number vertical-number" style={{ top: `${inch / paperHeightInches * 100}%` }}>{inch}</span>)}
-                {(['top', 'bottom'] as const).map(side => <button key={side} className={`ruler-handle ${side}`} title={`Arraste para ajustar margem ${side === 'top' ? 'superior' : 'inferior'}: ${margins[side]} pol.`} style={{ top: `${(side === 'top' ? margins.top : paperHeightInches - margins.bottom) / paperHeightInches * 100}%` }} onPointerDown={event => adjustMargin('vertical', side, event)}><span /></button>)}
+              <div className="vertical-ruler" ref={verticalRuler} role="group" aria-label="Régua vertical em polegadas" style={{ height: paperHeight, '--margin-start': `${verticalMarginStart}%`, '--margin-end': `${verticalMarginEnd}%` } as React.CSSProperties}>
+                <div className="vertical-scale" aria-hidden="true" />
+                {Array.from({ length: Math.floor(paperHeightInches) + 1 }, (_, inch) => <span key={inch} aria-hidden="true" className={`ruler-number vertical-number${inch === 0 ? ' edge-start' : ''}${labelAtRulerEnd(inch, paperHeightInches) ? ' edge-end' : ''}`} style={{ top: `${inch / paperHeightInches * 100}%` }}>{inch}</span>)}
+                {(['top', 'bottom'] as const).map(side => <button key={side} type="button" className={`ruler-handle ${side}`} aria-label={`Ajustar margem ${side === 'top' ? 'superior' : 'inferior'}: ${margins[side]} polegadas`} title={`Arraste para ajustar margem ${side === 'top' ? 'superior' : 'inferior'}: ${margins[side]} pol.`} style={{ top: `${rulerPercent(side === 'top' ? margins.top : paperHeightInches - margins.bottom, paperHeightInches)}%` }} onPointerDown={event => adjustMargin('vertical', side, event)}><span aria-hidden="true" /></button>)}
               </div>
               <article onContextMenu={openEditorContextMenu} style={{ width: paperWidth, minWidth: paperWidth, minHeight: pageStackHeight, padding: `${margins.top * 96}px ${margins.right * 96}px ${margins.bottom * 96}px ${margins.left * 96}px`, '--page-height': `${paperHeight}px`, '--page-pitch': `${pagePitch}px`, '--top-margin': `${margins.top * 96}px`, '--bottom-margin': `${margins.bottom * 96}px`, '--left-margin': `${margins.left * 96}px`, '--right-margin': `${margins.right * 96}px` } as React.CSSProperties}><EditorContent editor={editor} /></article>
             </div>

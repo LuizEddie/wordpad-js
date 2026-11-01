@@ -76,7 +76,7 @@ Um clique em um link abre o endereço em uma nova aba; links de e-mail e telefon
 Na guia **Layout**:
 
 - Escolha **A4** (padrão), Carta, Ofício/Legal, A3 ou A5.
-- Arraste os marcadores azuis nas réguas para alterar as margens esquerda, direita, superior e inferior.
+- As réguas finas seguem o estilo do Google Docs: escala em polegadas com marcações a cada 1/8 de polegada, números pequenos e a área fora das margens levemente sombreada. Arraste os marcadores azuis na borda das réguas para alterar as margens esquerda, direita, superior e inferior.
 - Você também pode digitar as margens em polegadas nos campos correspondentes.
 - O editor acrescenta páginas e cria quebras automáticas conforme o texto alcança a área útil. Parágrafos longos podem ser divididos entre páginas.
 - Listas também continuam na página seguinte apenas a partir do item ou trecho que exceder o espaço disponível; o marcador não é repetido no meio de um item continuado.
