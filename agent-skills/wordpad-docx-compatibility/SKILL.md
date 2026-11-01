@@ -21,6 +21,7 @@ Read the import/export sections of `docs/ARQUITETURA_E_DESENVOLVIMENTO.md` befor
 - Keep file parsing local to the browser and escape untrusted text/attributes during conversion. Never upload documents to a conversion service.
 - Maintain image media, list numbering, hyperlinks, tables/cells, inline marks, page breaks, page size and margins when the relevant feature is touched.
 - Be careful with units: OOXML uses twips for page/paragraph measurements and EMUs for drawing extents; browser CSS uses px/pt. Keep conversion formulas explicit and test round trips for sensible values.
+- To keep exported spacing close to the editor, derive twips from the same CSS the editor uses (`src/style.css`) and prefer `LineRuleType.EXACT` over `AUTO`; Word recomputes `AUTO` from the font's own metrics and drifts from the on-screen line height. Paragraph borders are anchored to the first line, so account for list hanging indents when positioning a quote bar.
 - Preserve data URI MIME types and image dimensions. Check formats supported by the DOCX writer; convert unsupported browser image types locally where feasible.
 - Avoid broad regex-only OOXML parsing when namespace-aware DOM APIs are available. Validate missing files, malformed XML, missing relationships and unknown image formats gracefully.
 - Importer and exporter changes are separate; update both only when warranted and document which direction was addressed.

@@ -132,6 +132,14 @@ Importar substitui o documento aberto. DOCX é um formato complexo; os recursos 
 ### 5.6 Exportação
 
 - `exportDocx()` converte a árvore JSON TipTap usando `docxBlocks()` e `inlineRuns()`, gera um pacote DOCX com `docx` e baixa pelo FileSaver. Imagens WEBP são convertidas para JPEG no navegador por `prepareDocxImages()` antes da geração. `readDocxPageSetup()` atua na importação e não deve ser confundida com o gerador.
+- O mapeamento busca reproduzir o que a folha do editor mostra, usando as mesmas medidas do CSS (`src/style.css`). Comprimentos em `px`/`pt`/`em` são convertidos para twips com `cssLengthToTwips()` (15 twips por px, 20 por pt) e entrelinhas com `cssLineHeightToTwips()`.
+- Entrelinha usa `LineRuleType.EXACT` com twips derivados da altura de linha do editor (1.65 × tamanho da fonte; títulos 1.2), e não `AUTO`, porque o Word recalcula `AUTO` a partir das métricas da própria fonte e abre o espaçamento. Parágrafos normais levam `after: 240` (1em), títulos usam `headingGap()`/`headingSizePt()`/`headingLineHeight()` (h1 24pt, h2 18pt, h3+ 12pt, com as margens do preflight).
+- Listas recebem definições de numeração inline por lista (`bulletNumbering()` reaproveitado, `orderedNumbering()` com `reference` único para preservar reinícios de contagem), 9 níveis, texto a `32px + 30px × nível` e recuo deslocado de 20px. Só o primeiro parágrafo de cada item recebe marcador; os demais ficam alinhados ao texto. O `margin-bottom` do container de lista é aplicado apenas no último item da lista mais externa.
+- Citação usa `DOCX_QUOTE_COLOR`, borda esquerda `B6C8DE` e recuo de 17px, com `space` calculado a partir do recuo da primeira linha (renderizadores ancoram a borda na primeira linha, e o OOXML limita a distância a 31pt). Listas dentro da citação herdam o recuo e a mesma borda.
+- Bloco de código usa fonte monoespaçada, fundo `F2F4F7` e bordas na mesma cor (72/8pt) para reproduzir o padding de 12px e a largura total do `<pre>`.
+- Tabelas mantêm `table-layout: fixed`, cabeçalho centralizado/negrito com fundo `EDF2F8`, bordas `9AA6B5` e o `after: 240` do parágrafo interno, que define a altura da linha como no editor. Separador horizontal usa `AEB8C4` com 18px de altura.
+- Links saem em `1155CC` e sublinhados, como o CSS do editor aplica a `a`. Marcas só são escritas quando existem no JSON: um `bold: false` explícito cancelaria o negrito herdado de título ou cabeçalho de tabela.
+- Quebras de página aplicam `pageBreakBefore` ao parágrafo seguinte, sem criar parágrafo vazio. Ao alterar `src/style.css`, revise estas constantes e funções para manter a correspondência.
 - `exportPdf()` chama `window.print()`; o navegador oferece “Salvar como PDF”. CSS `@page` e regras `@media print` definem a aparência de impressão.
 - `exportText()`, `exportHtml()` e `exportMarkdown()` geram downloads locais. A exportação Markdown atual parte de texto simples, sem converter todas as marcas TipTap em sintaxe Markdown.
 

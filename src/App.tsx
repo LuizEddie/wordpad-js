@@ -16,7 +16,7 @@ import TableCell from '@tiptap/extension-table-cell'
 import TableHeader from '@tiptap/extension-table-header'
 import Subscript from '@tiptap/extension-subscript'
 import Superscript from '@tiptap/extension-superscript'
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, ImageRun, ExternalHyperlink, Table as DocxTable, TableRow as DocxTableRow, TableCell as DocxTableCell, AlignmentType, BorderStyle, LineRuleType, type ParagraphChild } from 'docx'
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, ImageRun, ExternalHyperlink, Table as DocxTable, TableRow as DocxTableRow, TableCell as DocxTableCell, AlignmentType, BorderStyle, LineRuleType, LevelFormat, TableLayoutType, WidthType, type NumberingDefinition, type ParagraphChild } from 'docx'
 import { saveAs } from 'file-saver'
 import mammoth from 'mammoth'
 import JSZip from 'jszip'
@@ -113,7 +113,107 @@ async function prepareDocxImages(nodes: EditorNode[]): Promise<EditorNode[]> {
     return { ...next, content: next.content ? await prepareDocxImages(next.content) : undefined }
   }))
 }
-function inlineRuns(nodes: EditorNode[] = []): ParagraphChild[] {
+// The DOCX writer mirrors the editor defaults declared in src/style.css:
+// Arial 12pt, line-height 1.65, 1em between paragraphs, 30px list indents and
+// list items without extra gaps. Word derives AUTO line spacing from its own
+// font metrics, so the editor's line boxes are written as exact twips.
+const DOCX_PX_TO_TWIPS = 15
+const DOCX_PT_TO_TWIPS = 20
+const DOCX_BASE_PT = 12
+const DOCX_LINE_HEIGHT = 1.65
+const DOCX_TEXT_COLOR = '202124'
+const DOCX_LINK_COLOR = '1155CC'
+const DOCX_QUOTE_COLOR = '5C6673'
+const DOCX_LIST_STEP_PX = 30
+const DOCX_LIST_TEXT_PX = 32
+// 20px: the marker sits left of the 32px text column, matching the browser's
+// outside marker position, and stays clear of multi-digit numbers.
+const DOCX_LIST_HANGING_TWIPS = 300
+const DOCX_MAX_LIST_LEVEL = 8
+const DOCX_BULLET_MARKERS = ['•', '◦', '▪']
+
+type DocxRunStyle = { bold?: boolean; size?: number; color?: string; font?: string }
+type DocxListContext = { kind: 'bullet' | 'number'; level: number; definition: NumberingDefinition }
+type DocxBlockContext = { list?: DocxListContext; run?: DocxRunStyle; indentLeft?: number; quote?: boolean; quoteFirst?: boolean; listEnd?: boolean }
+type DocxExportState = { nextListId: number }
+
+function cssLengthToTwips(value: unknown, emPt = DOCX_BASE_PT): number | undefined {
+  const match = String(value ?? '').trim().match(/^(-?\d*\.?\d+)(px|pt|in|cm|mm|em|rem)?$/i)
+  if (!match) return undefined
+  const amount = Number.parseFloat(match[1])
+  if (!Number.isFinite(amount)) return undefined
+  const unit = (match[2] || 'px').toLowerCase()
+  if (unit === 'pt') return Math.round(amount * DOCX_PT_TO_TWIPS)
+  if (unit === 'em') return Math.round(amount * emPt * DOCX_PT_TO_TWIPS)
+  const px = unit === 'rem' ? amount * 16 : unit === 'in' ? amount * 96 : unit === 'cm' ? (amount * 96) / 2.54 : unit === 'mm' ? (amount * 96) / 25.4 : amount
+  return Math.round(px * DOCX_PX_TO_TWIPS)
+}
+
+function cssLineHeightToTwips(value: unknown, fontPt: number): number | undefined {
+  const text = String(value ?? '').trim()
+  if (!text) return undefined
+  if (/^-?\d*\.?\d+$/.test(text)) return Math.round(Number.parseFloat(text) * fontPt * DOCX_PT_TO_TWIPS)
+  return cssLengthToTwips(text, fontPt)
+}
+
+function maxRunPt(nodes: EditorNode[] = [], fallback = DOCX_BASE_PT): number {
+  return nodes.reduce((max, node) => {
+    if (node.type === 'text') {
+      const style = (node.marks || []).find(mark => mark.type === 'textStyle')?.attrs || {}
+      const pt = Number.parseFloat(String(style.fontSize ?? ''))
+      return Number.isFinite(pt) && pt > max ? pt : max
+    }
+    return node.content ? Math.max(max, maxRunPt(node.content, fallback)) : max
+  }, fallback)
+}
+
+function headingSizePt(level: number) { return level <= 1 ? 24 : level === 2 ? 18 : DOCX_BASE_PT }
+function headingLineHeight(level: number) { return level <= 1 ? 1.2 : DOCX_LINE_HEIGHT }
+function headingGap(level: number) {
+  if (level <= 1) return { before: 96, after: 312 } // .2em / .65em of 24pt
+  if (level === 2) return { before: 144, after: 216 } // .4em / .6em of 18pt
+  return { before: 0, after: 0 } // Tailwind preflight resets h3-h6
+}
+function exactLine(fontPt: number, multiplier: number) { return Math.round(multiplier * fontPt * DOCX_PT_TO_TWIPS) }
+
+function listLevelIndent(level: number) {
+  return { left: Math.round((DOCX_LIST_TEXT_PX + DOCX_LIST_STEP_PX * level) * DOCX_PX_TO_TWIPS), hanging: DOCX_LIST_HANGING_TWIPS }
+}
+
+// The rule sits 3px left of the text, like the editor's 3px border plus 14px
+// padding. OOXML caps the distance between border and text at 31pt.
+function quoteBorder(indentLeft: number) {
+  return { left: { style: BorderStyle.SINGLE, size: 18, color: 'B6C8DE', space: Math.min(31, Math.max(0, (indentLeft - 45) / 20)) } }
+}
+
+function bulletNumbering(): NumberingDefinition {
+  return {
+    reference: 'wordpad-bullets',
+    levels: Array.from({ length: DOCX_MAX_LIST_LEVEL + 1 }, (_, level) => ({
+      level,
+      format: LevelFormat.BULLET,
+      text: DOCX_BULLET_MARKERS[Math.min(level, DOCX_BULLET_MARKERS.length - 1)],
+      alignment: AlignmentType.LEFT,
+      style: { paragraph: { indent: listLevelIndent(level) }, run: { color: '5F6368' } },
+    })),
+  }
+}
+
+function orderedNumbering(reference: string, start: number): NumberingDefinition {
+  return {
+    reference,
+    levels: Array.from({ length: DOCX_MAX_LIST_LEVEL + 1 }, (_, level) => ({
+      level,
+      format: level === 0 ? LevelFormat.DECIMAL : level === 1 ? LevelFormat.LOWER_LETTER : LevelFormat.LOWER_ROMAN,
+      text: `%${level + 1}.`,
+      alignment: AlignmentType.LEFT,
+      start: level === 0 ? start : 1,
+      style: { paragraph: { indent: listLevelIndent(level) }, run: { color: '5F6368' } },
+    })),
+  }
+}
+
+function inlineRuns(nodes: EditorNode[] = [], base: DocxRunStyle = {}): ParagraphChild[] {
   return nodes.flatMap<ParagraphChild>(node => {
     if (node.type === 'image') {
       const src = String(node.attrs?.src || '')
@@ -123,59 +223,146 @@ function inlineRuns(nodes: EditorNode[] = []): ParagraphChild[] {
       const scale = Math.min(1, 570 / naturalW, 720 / naturalH)
       return [new ImageRun({ type: match[1] === 'jpeg' ? 'jpg' : match[1] as 'jpg' | 'png' | 'gif' | 'bmp', data: Uint8Array.from(atob(match[2]), char => char.charCodeAt(0)), transformation: { width: Math.round(naturalW * scale), height: Math.round(naturalH * scale) } })]
     }
-    if (node.type === 'hardBreak') return [new TextRun({ text: '', break: 1 })]
+    if (node.type === 'hardBreak') return [new TextRun({ break: 1 })]
     if (node.type !== 'text') return []
     const marks = node.marks || []
     const mark = (type: string) => marks.find(item => item.type === type)
     const style = mark('textStyle')?.attrs || {}
-    const color = normalizeDocxColor(style.color) || '202124'
+    const href = mark('link')?.attrs?.href
+    // The editor paints links blue and underlined through CSS on the anchor.
+    const color = normalizeDocxColor(style.color) || base.color || (href ? DOCX_LINK_COLOR : DOCX_TEXT_COLOR)
     const highlightHex = normalizeDocxColor(
       mark('highlight')?.attrs?.color,
     )
     const pt = Number.parseFloat(String(style.fontSize || ''))
-    // Word's built-in Heading 1 style is blue by default. Write the editor's
-    // dark text color explicitly when no color mark exists so DOCX theme styles
-    // cannot change the appearance of the untouched starter heading.
-    const textRun = new TextRun({ text: node.text || '', bold: !!mark('bold'), italics: !!mark('italic'), underline: mark('underline') ? {} : undefined, strike: !!mark('strike'), subScript: !!mark('subscript'), superScript: !!mark('superscript'), color: color || '202124', shading: highlightHex ? { fill: highlightHex } : undefined, size: Number.isFinite(pt) && pt > 0 ? Math.round(pt * 2) : undefined, font: typeof style.fontFamily === 'string' ? style.fontFamily.replaceAll('"', '') : undefined })
-    const href = mark('link')?.attrs?.href
+    const size = Number.isFinite(pt) && pt > 0 ? Math.round(pt * 2) : base.size
+    const font = typeof style.fontFamily === 'string' ? style.fontFamily.replaceAll('"', '') : base.font
+    // Only write marks that exist: an explicit bold=false would also cancel bold
+    // inherited from heading or table-header styles.
+    const textRun = new TextRun({ text: node.text || '', bold: mark('bold') ? true : base.bold, italics: mark('italic') ? true : undefined, underline: mark('underline') || href ? {} : undefined, strike: mark('strike') ? true : undefined, subScript: mark('subscript') ? true : undefined, superScript: mark('superscript') ? true : undefined, color, shading: highlightHex ? { fill: highlightHex } : undefined, size, font })
     return href ? [new ExternalHyperlink({ link: String(href), children: [textRun] })] : [textRun]
   })
 }
-function docxBlocks(node: EditorNode, list?: 'bullet' | 'number'): (Paragraph | DocxTable)[] {
+
+function docxBlocks(node: EditorNode, context: DocxBlockContext = {}, state: DocxExportState = { nextListId: 1 }): (Paragraph | DocxTable)[] {
   const content = node.content || []
-  if (node.type === 'bulletList' || node.type === 'orderedList') return content.flatMap(item => docxBlocks(item, node.type === 'bulletList' ? 'bullet' : 'number'))
+  if (node.type === 'bulletList' || node.type === 'orderedList') {
+    const kind = node.type === 'bulletList' ? 'bullet' : 'number'
+    const outermost = !context.list
+    const level = Math.min(DOCX_MAX_LIST_LEVEL, context.list ? context.list.level + 1 : 0)
+    const start = Math.max(1, Math.round(Number(node.attrs?.start) || 1))
+    const definition = kind === 'bullet' ? bulletNumbering() : orderedNumbering(`wordpad-numbers-${state.nextListId++}`, start)
+    const endsOuterList = outermost || Boolean(context.listEnd)
+    return content.flatMap((item, index) => docxBlocks(item, { ...context, list: { kind, level, definition }, listEnd: endsOuterList && index === content.length - 1 }, state))
+  }
   if (node.type === 'listItem') {
     const continuation = Boolean(node.attrs?.paginationContinuation)
-    return content.flatMap(item => item.type === 'paragraph' ? [new Paragraph({ children: inlineRuns(item.content), bullet: !continuation && list === 'bullet' ? { level: 0 } : undefined, numbering: !continuation && list === 'number' ? { reference: 'wordpad-numbering', level: 0 } : undefined })] : docxBlocks(item, list))
+    const list = context.list
+    const firstParagraph = content.findIndex(item => item.type === 'paragraph')
+    const quoteIndent = context.indentLeft || 0
+    return content.flatMap((item, index) => {
+      const last = index === content.length - 1
+      if (item.type !== 'paragraph') return docxBlocks(item, { ...context, listEnd: Boolean(context.listEnd) && last }, state)
+      const fontPt = Math.max(DOCX_BASE_PT, maxRunPt(item.content))
+      // The browser gives list containers a 1em bottom margin but no gap
+      // between items, so only the last item of the outermost list carries it.
+      const spacing = { before: 0, after: context.listEnd && last ? 240 : 0, line: exactLine(fontPt, DOCX_LINE_HEIGHT), lineRule: LineRuleType.EXACT }
+      const indent = list ? listLevelIndent(list.level) : undefined
+      const left = (indent?.left || 0) + quoteIndent
+      // Only the first paragraph of an item carries the marker; following
+      // paragraphs stay aligned with the item text, as in the editor.
+      const numbered = index === firstParagraph && !continuation
+      // Renderers anchor paragraph borders on the first line, which for a
+      // numbered item starts one hanging indent left of the text.
+      const border = context.quote ? quoteBorder(left - (numbered ? DOCX_LIST_HANGING_TWIPS : 0)) : undefined
+      if (!list) return [new Paragraph({ children: inlineRuns(item.content, context.run), indent: left ? { left } : undefined, spacing, border, widowControl: true })]
+      return [new Paragraph({
+        children: inlineRuns(item.content, context.run),
+        numbering: numbered ? { reference: list.definition, level: list.level } : undefined,
+        indent: numbered ? { left, hanging: DOCX_LIST_HANGING_TWIPS } : { left },
+        spacing,
+        border,
+        widowControl: true,
+      })]
+    })
   }
   if (node.type === 'table') {
     const rows = content.map(row => {
-      const cells = (row.content || []).map(cell => new DocxTableCell({
-        children: (cell.content || []).map(paragraph => new Paragraph({ children: inlineRuns(paragraph.content), spacing: { after: 160, line: 396, lineRule: LineRuleType.AUTO } })),
-        shading: cell.type === 'tableHeader' ? { fill: 'E8EFF8' } : (typeof cell.attrs?.docxCellStyle === 'string' ? { fill: normalizeDocxColor(cell.attrs.docxCellStyle) } : undefined),
-        margins: { top: 90, bottom: 90, left: 110, right: 110 },
-        borders: Object.fromEntries(['top', 'bottom', 'left', 'right'].map(edge => [edge, { style: BorderStyle.SINGLE, size: 4, color: '9AA6B5' }])) as never,
-      }))
+      const cells = (row.content || []).map(cell => {
+        const header = cell.type === 'tableHeader'
+        const cellBlocks = (cell.content || []).flatMap(paragraph => paragraph.type === 'paragraph'
+          ? [new Paragraph({
+            children: inlineRuns(paragraph.content, header ? { bold: true } : {}),
+            // <th> centres its content in the browser and every cell paragraph
+            // keeps the editor's 1em bottom margin, which sets the row height.
+            alignment: paragraph.attrs?.textAlign === 'center' ? AlignmentType.CENTER : paragraph.attrs?.textAlign === 'right' ? AlignmentType.RIGHT : paragraph.attrs?.textAlign === 'justify' ? AlignmentType.JUSTIFIED : header ? AlignmentType.CENTER : AlignmentType.LEFT,
+            spacing: { before: 0, after: 240, line: exactLine(Math.max(DOCX_BASE_PT, maxRunPt(paragraph.content)), DOCX_LINE_HEIGHT), lineRule: LineRuleType.EXACT },
+            widowControl: true,
+          })]
+          : docxBlocks(paragraph, {}, state))
+        return new DocxTableCell({
+          children: cellBlocks.length ? cellBlocks : [new Paragraph({})],
+          shading: header ? { fill: 'EDF2F8' } : (typeof cell.attrs?.docxCellStyle === 'string' ? { fill: normalizeDocxColor(cell.attrs.docxCellStyle) } : undefined),
+          margins: { top: 90, bottom: 90, left: 120, right: 120 },
+          borders: Object.fromEntries(['top', 'bottom', 'left', 'right'].map(edge => [edge, { style: BorderStyle.SINGLE, size: 6, color: '9AA6B5' }])) as never,
+        })
+      })
       return new DocxTableRow({ children: cells })
     })
-    return [new DocxTable({ rows })]
+    return [new DocxTable({ rows, width: { size: 100, type: WidthType.PERCENTAGE }, layout: TableLayoutType.FIXED })]
   }
   if (node.type === 'pageBreak') return [new Paragraph({ pageBreakBefore: true })]
-  if (node.type === 'horizontalRule') return [new Paragraph({ border: { bottom: { color: 'AEB8C4', size: 4, style: 'single' } } })]
-  if (node.type === 'blockquote') return content.flatMap(child => docxBlocks(child))
-  if (node.type === 'image') return [new Paragraph({ children: inlineRuns([node]), alignment: node.attrs?.align === 'left' ? AlignmentType.LEFT : node.attrs?.align === 'right' ? AlignmentType.RIGHT : AlignmentType.CENTER })]
+  if (node.type === 'horizontalRule') return [new Paragraph({ border: { bottom: { color: 'AEB8C4', size: 6, style: BorderStyle.SINGLE } }, spacing: { before: 270, after: 270, line: 20, lineRule: LineRuleType.EXACT } })]
+  if (node.type === 'blockquote') {
+    const indentLeft = (context.indentLeft || 0) + 255 // 14px padding + 3px border
+    const run: DocxRunStyle = { ...(context.run || {}), color: DOCX_QUOTE_COLOR }
+    return content.flatMap((child, index) => docxBlocks(child, { ...context, list: undefined, quote: true, quoteFirst: index === 0, indentLeft, run }, state))
+  }
+  if (node.type === 'image') return [new Paragraph({ children: inlineRuns([node], context.run), alignment: node.attrs?.align === 'left' ? AlignmentType.LEFT : node.attrs?.align === 'right' ? AlignmentType.RIGHT : AlignmentType.CENTER, spacing: { before: 180, after: 180, line: 240, lineRule: LineRuleType.AUTO } })]
   if (['paragraph', 'heading', 'codeBlock'].includes(node.type || '')) {
+    const isHeading = node.type === 'heading'
+    const isCode = node.type === 'codeBlock'
+    const headingLevel = isHeading ? Math.min(6, Math.max(1, Math.round(Number(node.attrs?.level) || 1))) : 0
+    const basePt = headingLevel ? headingSizePt(headingLevel) : DOCX_BASE_PT
+    const fontPt = Math.max(basePt, maxRunPt(content, basePt))
     const alignment = node.attrs?.textAlign === 'center' ? AlignmentType.CENTER : node.attrs?.textAlign === 'right' ? AlignmentType.RIGHT : node.attrs?.textAlign === 'justify' ? AlignmentType.JUSTIFIED : AlignmentType.LEFT
     const layout = typeof node.attrs?.docxLayout === 'string' ? node.attrs.docxLayout : ''
     const css = Object.fromEntries(layout.split(';').map(part => part.split(':').map(value => value.trim())).filter(pair => pair.length === 2))
-    const px = (key: string) => { const value = Number.parseFloat(String(css[key] || '')); return Number.isFinite(value) ? Math.round(value * 15) : undefined }
-    const line = String(css['line-height'] || '')
-    const lineValue = Number.parseFloat(line)
-    const spacing = { before: px('margin-top'), after: px('margin-bottom') ?? (node.type === 'heading' ? 120 : 240), line: line && Number.isFinite(lineValue) ? Math.round(line.endsWith('px') ? lineValue * 15 : lineValue * 240) : 396, lineRule: line.endsWith('px') ? LineRuleType.EXACT : LineRuleType.AUTO }
-    const indent = { left: px('margin-left'), right: px('margin-right'), firstLine: px('text-indent') && px('text-indent')! > 0 ? px('text-indent') : undefined, hanging: px('text-indent') && px('text-indent')! < 0 ? Math.abs(px('text-indent')!) : undefined }
-    return [new Paragraph({ children: inlineRuns(content), alignment, indent, heading: node.type === 'heading' ? (node.attrs?.level === 1 ? HeadingLevel.HEADING_1 : HeadingLevel.HEADING_2) : undefined, spacing, widowControl: true })]
+    const cssTwips = (key: string) => cssLengthToTwips(css[key], basePt)
+    const gap = headingGap(headingLevel)
+    const defaultBefore = context.quote ? (context.quoteFirst ? 240 : 0) : headingLevel ? gap.before : 0
+    const defaultAfter = context.quote ? 240 : headingLevel ? gap.after : isCode ? 0 : 240
+    const defaultLine = headingLevel ? exactLine(fontPt, headingLineHeight(headingLevel)) : exactLine(fontPt, DOCX_LINE_HEIGHT)
+    const marginLeft = cssTwips('margin-left') ?? 0
+    const marginRight = cssTwips('margin-right') ?? 0
+    const textIndent = cssTwips('text-indent')
+    const indentLeft = marginLeft + (context.indentLeft || 0) + (isCode ? 180 : 0)
+    const indentRight = marginRight + (isCode ? 180 : 0)
+    const headingStyle = headingLevel === 1 ? HeadingLevel.HEADING_1 : headingLevel === 2 ? HeadingLevel.HEADING_2 : headingLevel === 3 ? HeadingLevel.HEADING_3 : headingLevel === 4 ? HeadingLevel.HEADING_4 : headingLevel === 5 ? HeadingLevel.HEADING_5 : headingLevel === 6 ? HeadingLevel.HEADING_6 : undefined
+    const runStyle: DocxRunStyle = { ...(context.run || {}), ...(headingLevel ? { size: Math.round(basePt * 2), bold: false } : {}), ...(isCode ? { font: 'Courier New' } : {}) }
+    return [new Paragraph({
+      children: inlineRuns(content, runStyle),
+      alignment,
+      indent: { left: indentLeft || undefined, right: indentRight || undefined, firstLine: textIndent && textIndent > 0 ? textIndent : undefined, hanging: textIndent && textIndent < 0 ? Math.abs(textIndent) : undefined },
+      heading: headingStyle,
+      spacing: { before: cssTwips('margin-top') ?? defaultBefore, after: cssTwips('margin-bottom') ?? defaultAfter, line: cssLineHeightToTwips(css['line-height'], fontPt) ?? defaultLine, lineRule: LineRuleType.EXACT },
+      shading: isCode ? { fill: 'F2F4F7' } : undefined,
+      // Borders in the shading colour reproduce the 12px padding of the
+      // editor's <pre> box, including its full-width background.
+      border: isCode
+        ? {
+          top: { style: BorderStyle.SINGLE, size: 72, color: 'F2F4F7', space: 0 },
+          bottom: { style: BorderStyle.SINGLE, size: 72, color: 'F2F4F7', space: 0 },
+          left: { style: BorderStyle.SINGLE, size: 72, color: 'F2F4F7', space: 0 },
+          right: { style: BorderStyle.SINGLE, size: 72, color: 'F2F4F7', space: 0 },
+        }
+        : context.quote
+          ? quoteBorder(indentLeft + Math.min(0, textIndent || 0))
+          : undefined,
+      widowControl: true,
+    })]
   }
-  return content.flatMap(child => docxBlocks(child, list))
+  return content.flatMap(child => docxBlocks(child, context, state))
 }
 
 async function readDocxPageSetup(arrayBuffer: ArrayBuffer): Promise<{ paperSize: PaperSize; margins: Margins }> {
@@ -926,9 +1113,21 @@ export default function App() {
   const exportDocx = async () => {
     if (!editor) return
     const blocks = await prepareDocxImages(editor.getJSON().content || [])
-    const children = blocks.flatMap(block => docxBlocks(block))
-    const numbering = { config: [{ reference: 'wordpad-numbering', levels: [{ level: 0, format: 'decimal' as const, text: '%1.', alignment: 'start' as const, style: { paragraph: { indent: { left: 720, hanging: 260 } } } }] }] }
-    const doc = new Document({ numbering, styles: { default: { document: { run: { font: 'Arial', size: 24 }, paragraph: { spacing: { after: 240, line: 396, lineRule: LineRuleType.AUTO } } } } }, sections: [{ properties: { page: { size: { width: Math.round(paper.width / 25.4 * 1440), height: Math.round(paper.height / 25.4 * 1440) }, margin: { top: Math.round(margins.top * 1440), right: Math.round(margins.right * 1440), bottom: Math.round(margins.bottom * 1440), left: Math.round(margins.left * 1440) } } }, children }] })
+    const state: DocxExportState = { nextListId: 1 }
+    const children: (Paragraph | DocxTable)[] = []
+    // A page break is applied to the following paragraph so the exported file
+    // does not gain an empty paragraph at the top of the new page.
+    let breakBefore = false
+    for (const block of blocks) {
+      if (block.type === 'pageBreak') { breakBefore = true; continue }
+      for (const child of docxBlocks(block, {}, state)) {
+        if (breakBefore && child instanceof Paragraph) { children.push(child.with({ pageBreakBefore: true })); breakBefore = false }
+        else children.push(child)
+      }
+    }
+    if (breakBefore) children.push(new Paragraph({ pageBreakBefore: true }))
+    if (!children.length) children.push(new Paragraph({}))
+    const doc = new Document({ styles: { default: { document: { run: { font: 'Arial', size: 24, color: '202124' }, paragraph: { spacing: { after: 240, line: 396, lineRule: LineRuleType.EXACT } } } } }, sections: [{ properties: { page: { size: { width: Math.round(paper.width / 25.4 * 1440), height: Math.round(paper.height / 25.4 * 1440) }, margin: { top: Math.round(margins.top * 1440), right: Math.round(margins.right * 1440), bottom: Math.round(margins.bottom * 1440), left: Math.round(margins.left * 1440) } } }, children }] })
     download(await Packer.toBlob(doc), `${title || 'documento'}.docx`, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
   }
   const exportPdf = () => window.print()
