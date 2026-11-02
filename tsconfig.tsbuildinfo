@@ -1,1 +1,1 @@
-{"root":["./src/App.tsx","./src/docx-import.ts","./src/main.tsx","./src/vite-env.d.ts","./vite.config.ts"],"version":"5.6.3"}
+{"root":["./src/App.tsx","./src/docx-import.ts","./src/main.tsx","./src/vite-env.d.ts","./src/test/editor.ts","./src/test/setup.ts","./src/test/integration/app.test.tsx","./src/test/unit/docx-import.test.ts","./src/test/unit/format-painter.test.ts","./src/test/unit/helpers.test.ts","./vite.config.ts","./vitest.config.ts"],"version":"5.6.3"}

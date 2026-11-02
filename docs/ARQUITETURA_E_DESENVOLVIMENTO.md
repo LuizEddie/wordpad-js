@@ -46,14 +46,20 @@ Não introduza dependências de rede ou serviços externos sem atualizar a arqui
 │   ├── docx-import.ts          # Leitura OOXML DOCX para HTML editável
 │   ├── main.tsx                # Ponto de entrada React
 │   ├── style.css               # Layout, editor, réguas, impressão e responsividade
-│   └── vite-env.d.ts           # Tipos do cliente Vite (import.meta.env)
+│   ├── vite-env.d.ts           # Tipos do cliente Vite (import.meta.env)
+│   └── test/
+│       ├── setup.ts            # Polyfills do jsdom e limpeza entre testes
+│       ├── editor.ts           # Fábrica de editor TipTap sem interface
+│       ├── unit/               # Pincel, helpers e importador DOCX
+│       └── integration/        # Montagem do <App /> com Testing Library
 ├── index.html                  # Documento HTML inicial do Vite
 ├── package.json                # Dependências e scripts npm/pnpm
 ├── pnpm-lock.yaml              # Lockfile pnpm; preservar e atualizar com pnpm
 ├── postcss.config.js           # Pipeline PostCSS/Tailwind
 ├── tailwind.config.js           # Conteúdo e tema Tailwind
 ├── tsconfig.json               # Configuração TypeScript
-└── vite.config.ts              # React, PWA, manifesto e regras de cache
+├── vite.config.ts              # React, PWA, manifesto e regras de cache
+└── vitest.config.ts            # Runner de testes (jsdom + Testing Library)
 ```
 
 `dist/` é resultado gerado pelo build e não deve ser editado manualmente. `node_modules/` contém dependências locais. O lockfile presente é `pnpm-lock.yaml`, embora o README também mostre comandos npm para instalação.
@@ -77,6 +83,8 @@ pnpm install
 pnpm dev
 pnpm build
 pnpm preview
+pnpm test
+pnpm test:watch
 ```
 
 Os scripts definidos em `package.json` são:
@@ -84,8 +92,20 @@ Os scripts definidos em `package.json` são:
 - `dev`: inicia Vite em `0.0.0.0:3000`.
 - `build`: executa `tsc -b` e, se não houver erros, `vite build`.
 - `preview`: serve localmente o conteúdo de `dist/`.
+- `test`: executa a suíte Vitest uma vez (`vitest run`).
+- `test:watch`: executa Vitest em modo watch.
 
-Para validar uma alteração antes de entregá-la, execute `pnpm build`. Não edite o `dist/` como fonte de verdade. Para testar instalação/offline, sirva o build por HTTPS ou use `localhost`, que é tratado como contexto seguro pelo navegador.
+Para validar uma alteração antes de entregá-la, execute `pnpm test` e `pnpm build`. Não edite o `dist/` como fonte de verdade. Para testar instalação/offline, sirva o build por HTTPS ou use `localhost`, que é tratado como contexto seguro pelo navegador.
+
+### 4.1 Testes automatizados
+
+A suíte usa Vitest com ambiente `jsdom`, Testing Library e `jest-dom`. `vitest.config.ts` é separado de `vite.config.ts` para não carregar o plugin PWA durante os testes; os arquivos de teste ficam em `src/test/**/*.test.{ts,tsx}`.
+
+- **Unidade (`src/test/unit/`)**: `format-painter.test.ts` cobre captura e aplicação do pincel, seleção parcial versus parágrafo inteiro, títulos, listas, links e limpeza de formatação; `helpers.test.ts` cobre conversões de unidades, tamanhos de título, layout, links e continuação de listas; `docx-import.test.ts` monta pacotes DOCX em memória com JSZip e verifica parágrafos, runs, títulos, espaçamento, listas, hyperlinks, tabelas, quebras, imagens e erros.
+- **Integração (`src/test/integration/app.test.tsx`)**: monta o `<App />` real, verifica acessibilidade dos controles, armar/desarmar o pincel, modo fixo por clique duplo, cancelamento com `Escape`, aplicação por mouse em seleção parcial/inteira, aplicação após o debounce de seleção por teclado, aviso de “nada a aplicar” e autossalvamento no `localStorage`.
+- **Infraestrutura**: `src/test/setup.ts` registra polyfills mínimos do jsdom (`matchMedia`, observers, `scrollIntoView`, `elementFromPoint`, URLs de objeto e retângulos de `Range`) e limpa DOM/`localStorage` entre testes. `src/test/editor.ts` cria uma instância TipTap real com `createWordpadExtensions()`, garantindo o mesmo schema da aplicação sem montar a interface.
+
+Os testes exercitam o modelo ProseMirror e o comportamento React, não o layout real: jsdom não calcula geometria, então paginação, réguas, impressão e fidelidade visual de DOCX/PDF continuam dependendo de validação manual no navegador. Ao alterar schema, extensões ou helpers exportados de `App.tsx`, rode a suíte e ajuste os testes junto com a mudança.
 
 ## 5. Arquitetura de execução
 
@@ -159,6 +179,7 @@ O arquivo é extenso e atualmente reúne áreas distintas. Principais funções/
 
 | Símbolo | Responsabilidade |
 | --- | --- |
+| `createWordpadExtensions` | Fábrica da lista de extensões TipTap usada pelo app e pelos testes, evitando compartilhar instâncias entre editores. |
 | `readDocs` | Lê os documentos recentes do `localStorage`, tolerando JSON inválido. |
 | `prepareDocxImages` | Converte fontes WEBP embutidas para JPEG e prepara os nós de imagem para o exportador DOCX. |
 | `inlineRuns` | Traduz nós inline/marks do TipTap em `TextRun`, `ImageRun` e hyperlink DOCX. |
@@ -200,7 +221,7 @@ Contém tokens/regras globais, layout de janela e faixas, folha de edição, ré
 5. **Evite dependência de backend.** Arquivos devem ser processados com APIs do navegador. Conteúdo não deve ser enviado para analytics, APIs, storage remoto ou serviços de conversão.
 6. **Atualize documentação.** Alterações visíveis devem ser refletidas em `docs/GUIA_DO_USUARIO.md` e na cópia incorporada `public/guia-do-usuario.html`; alterações de arquitetura devem atualizar este documento e/ou as skills.
 7. **Use os gerenciadores coerentemente.** O repositório mantém `pnpm-lock.yaml`. Se mudar dependências, atualize o lockfile com pnpm e confira o diff; não remova ou regenere lockfiles sem necessidade.
-8. **Valide o resultado.** Execute `pnpm build`. Para ajustes em paginação, réguas, imagens, tabelas ou exportação, valide também o fluxo visual/arquivo pertinente; build isolado não detecta erros de medição/renderização.
+8. **Valide o resultado.** Execute `pnpm test` e `pnpm build`. Para ajustes em paginação, réguas, imagens, tabelas ou exportação, valide também o fluxo visual/arquivo pertinente; testes em jsdom e build isolado não detectam erros de medição/renderização.
 
 ### Padrões de implementação
 
@@ -228,7 +249,7 @@ Contém tokens/regras globais, layout de janela e faixas, folha de edição, ré
 - [ ] Considera desktop, viewport estreita e impressão quando a mudança for visual.
 - [ ] Importa e exporta os tipos de conteúdo afetados sem perda indevida.
 - [ ] Atualiza o guia de usuário quando muda a interface.
-- [ ] Executa `pnpm build` e registra limitações observadas.
+- [ ] Executa `pnpm test` e `pnpm build` e registra limitações observadas.
 
 ## 10. Instruções para agentes
 
@@ -244,7 +265,7 @@ As skills definem contexto, invariantes, arquivos relevantes e validações espe
 
 ## 11. Índice da documentação do projeto
 
-- [README do projeto](../README.md): apresentação e comandos rápidos.
+- [README do projeto](../README.md): apresentação, comandos rápidos e visão geral dos testes.
 - [Guia completo do usuário](GUIA_DO_USUARIO.md): operações da interface, formatos e solução de problemas.
 - [Instruções gerais para agentes](../AGENTS.md): regras essenciais do checkout.
 - [Skill de desenvolvimento geral](../agent-skills/wordpad-project-development/SKILL.md).

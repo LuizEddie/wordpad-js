@@ -29,9 +29,9 @@ import {
   Scissors, Subscript as SubscriptIcon, Type, Pilcrow, RemoveFormatting, FilePlus2 as PagePlus, Trash2, PaintRoller,
 } from 'lucide-react'
 
-type Margins = { left: number; right: number; top: number; bottom: number }
-type SavedDoc = { title: string; content: string; updatedAt: number; margins?: Margins; paperSize?: string }
-const STORAGE_KEY = 'wordpad-documents-v1'
+export type Margins = { left: number; right: number; top: number; bottom: number }
+export type SavedDoc = { title: string; content: string; updatedAt: number; margins?: Margins; paperSize?: string }
+export const STORAGE_KEY = 'wordpad-documents-v1'
 const STARTER = '<h1>Bem-vindo ao Wordpad</h1><p>Seu editor privado e offline. Comece a escrever aqui.</p><p>Use a faixa de ferramentas para formatar ou abra um documento do computador.</p>'
 const PAPER_SIZES = {
   A4: { label: 'A4 · 210 × 297 mm', width: 210, height: 297 },
@@ -67,14 +67,14 @@ const DEFAULT_FONT_FAMILY = 'Arial'
 const FONT_SIZE_PRESETS = ['8', '9', '10', '11', '12', '14', '16', '18', '20', '24', '28', '36', '48', '72']
 const FONT_SIZE_MIN = 1
 const FONT_SIZE_MAX = 400
-function parseFontSizeInput(value: string): number | null {
+export function parseFontSizeInput(value: string): number | null {
   const text = value.trim().toLowerCase().replace(',', '.').replace(/\s*pt$/, '')
   if (!/^\d*\.?\d+$/.test(text)) return null
   const size = Number.parseFloat(text)
   if (!Number.isFinite(size) || size <= 0) return null
   return Number(Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, size)).toFixed(1))
 }
-const readDocs = (): SavedDoc[] => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]') as SavedDoc[] } catch { return [] } }
+export const readDocs = (): SavedDoc[] => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]') as SavedDoc[] } catch { return [] } }
 function normalizeDocxColor(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
 
@@ -161,7 +161,7 @@ type DocxListContext = { kind: 'bullet' | 'number'; level: number; definition: N
 type DocxBlockContext = { list?: DocxListContext; run?: DocxRunStyle; indentLeft?: number; quote?: boolean; quoteFirst?: boolean; listEnd?: boolean; listContinues?: boolean }
 type DocxExportState = { nextListId: number }
 
-function cssLengthToTwips(value: unknown, emPt = DOCX_BASE_PT): number | undefined {
+export function cssLengthToTwips(value: unknown, emPt = DOCX_BASE_PT): number | undefined {
   const match = String(value ?? '').trim().match(/^(-?\d*\.?\d+)(px|pt|in|cm|mm|em|rem)?$/i)
   if (!match) return undefined
   const amount = Number.parseFloat(match[1])
@@ -173,7 +173,7 @@ function cssLengthToTwips(value: unknown, emPt = DOCX_BASE_PT): number | undefin
   return Math.round(px * DOCX_PX_TO_TWIPS)
 }
 
-function cssLineHeightToTwips(value: unknown, fontPt: number): number | undefined {
+export function cssLineHeightToTwips(value: unknown, fontPt: number): number | undefined {
   const text = String(value ?? '').trim()
   if (!text) return undefined
   if (/^-?\d*\.?\d+$/.test(text)) return Math.round(Number.parseFloat(text) * fontPt * DOCX_PT_TO_TWIPS)
@@ -194,10 +194,10 @@ function maxRunPt(nodes: EditorNode[] = [], fallback = DOCX_BASE_PT): number {
 // Matches the sizes in style.css (.document-editor h1-h6). Keeping both in
 // sync makes the caret's font-size field and the DOCX export agree with what
 // the page actually paints.
-function headingSizePt(level: number) {
+export function headingSizePt(level: number) {
   return level <= 1 ? 24 : level === 2 ? 18 : level === 3 ? 14 : level === 4 ? 12 : level === 5 ? 11 : 10
 }
-function parseFontSizePt(value: unknown, basePt = DOCX_BASE_PT): number | undefined {
+export function parseFontSizePt(value: unknown, basePt = DOCX_BASE_PT): number | undefined {
   const text = String(value ?? '').trim().toLowerCase()
   const num = Number.parseFloat(text)
   if (!Number.isFinite(num) || num <= 0) return undefined
@@ -207,7 +207,7 @@ function parseFontSizePt(value: unknown, basePt = DOCX_BASE_PT): number | undefi
 }
 // Inline styles may carry quotes or a fallback stack; the picker only needs
 // the first family name.
-function parseFontFamily(value: unknown): string {
+export function parseFontFamily(value: unknown): string {
   const first = String(value ?? '').split(',')[0].trim().replace(/^["']+|["']+$/g, '').trim()
   return first || DEFAULT_FONT_FAMILY
 }
@@ -262,7 +262,7 @@ function inlinePastedStyles(html: string): string {
   return doc.body?.innerHTML ?? html
 }
 const LINK_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:'])
-function resolveLinkUrl(href: string | null | undefined): string | undefined {
+export function resolveLinkUrl(href: string | null | undefined): string | undefined {
   const raw = String(href ?? '').trim()
   if (!raw) return undefined
   const candidate = /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : raw.startsWith('//') ? `https:${raw}` : `https://${raw}`
@@ -277,13 +277,13 @@ function resolveLinkUrl(href: string | null | undefined): string | undefined {
 // selection) and applies them to the next text the user selects. Links and
 // list membership belong to the content, not to the visual formatting, so they
 // are neither copied nor removed from the target.
-const PAINTED_MARK_NAMES = ['bold', 'italic', 'underline', 'strike', 'superscript', 'subscript', 'code', 'textStyle', 'highlight'] as const
-type PaintedMark = { type: string; attrs?: Record<string, unknown> }
-type PaintedBlock = { type: 'paragraph' | 'heading'; level: number; textAlign: string | null; docxLayout: string | null }
-type PaintedFormat = { marks: PaintedMark[]; blockMarks: PaintedMark[]; block: PaintedBlock }
-type PaintedApplyResult = 'applied' | 'no-selection' | 'no-change'
+export const PAINTED_MARK_NAMES = ['bold', 'italic', 'underline', 'strike', 'superscript', 'subscript', 'code', 'textStyle', 'highlight'] as const
+export type PaintedMark = { type: string; attrs?: Record<string, unknown> }
+export type PaintedBlock = { type: 'paragraph' | 'heading'; level: number; textAlign: string | null; docxLayout: string | null }
+export type PaintedFormat = { marks: PaintedMark[]; blockMarks: PaintedMark[]; block: PaintedBlock }
+export type PaintedApplyResult = 'applied' | 'no-selection' | 'no-change'
 
-function capturePaintedFormat(editor: Editor): PaintedFormat {
+export function capturePaintedFormat(editor: Editor): PaintedFormat {
   const { state } = editor
   const { from, to, empty, $from } = state.selection
   let marks = $from.marks()
@@ -326,7 +326,7 @@ function capturePaintedFormat(editor: Editor): PaintedFormat {
 
 // Merges the source's explicit marks with the block's implicit ones without
 // losing textStyle attributes (font family/color captured from the text win).
-function mergePaintedMarks(base: PaintedMark[], extra: PaintedMark[]): PaintedMark[] {
+export function mergePaintedMarks(base: PaintedMark[], extra: PaintedMark[]): PaintedMark[] {
   const merged: PaintedMark[] = base.map(mark => ({ type: mark.type, attrs: mark.attrs ? { ...mark.attrs } : undefined }))
   for (const item of extra) {
     if (item.type === 'textStyle') {
@@ -340,7 +340,7 @@ function mergePaintedMarks(base: PaintedMark[], extra: PaintedMark[]): PaintedMa
   return merged
 }
 
-function applyPaintedFormat(editor: Editor, format: PaintedFormat): PaintedApplyResult {
+export function applyPaintedFormat(editor: Editor, format: PaintedFormat): PaintedApplyResult {
   const { state } = editor
   const { from, to, empty } = state.selection
   // The brush changes only what is selected. A collapsed cursor has nothing to
@@ -401,7 +401,7 @@ function applyPaintedFormat(editor: Editor, format: PaintedFormat): PaintedApply
 // declaration list. Keeping it in sync with what the DOCX writer reads lets
 // the editor and the exported file share one source of truth.
 type BlockSpacing = { lineHeight: number; beforePt: number; afterPt: number }
-function parseLayoutDeclarations(layout: unknown): Record<string, string> {
+export function parseLayoutDeclarations(layout: unknown): Record<string, string> {
   const declarations: Record<string, string> = {}
   String(layout ?? '').split(';').forEach(part => {
     const separator = part.indexOf(':')
@@ -412,11 +412,11 @@ function parseLayoutDeclarations(layout: unknown): Record<string, string> {
   })
   return declarations
 }
-function serializeLayoutDeclarations(declarations: Record<string, string>): string | null {
+export function serializeLayoutDeclarations(declarations: Record<string, string>): string | null {
   const parts = Object.entries(declarations).filter(([, value]) => value).map(([key, value]) => `${key}:${value}`)
   return parts.length ? parts.join(';') : null
 }
-function cssLengthToPt(value: unknown, emPt = DOCX_BASE_PT): number | undefined {
+export function cssLengthToPt(value: unknown, emPt = DOCX_BASE_PT): number | undefined {
   const match = String(value ?? '').trim().match(/^(-?\d*\.?\d+)(px|pt|in|cm|mm|em|rem)?$/i)
   if (!match) return undefined
   const amount = Number.parseFloat(match[1])
@@ -440,8 +440,8 @@ function readBlockSpacing(element: HTMLElement | null): BlockSpacing {
   const lineHeight = Number.isFinite(linePx) && linePx > 0 ? (linePx * 0.75) / fontPt : DOCX_LINE_HEIGHT
   return { lineHeight: Number(lineHeight.toFixed(2)), beforePt: Number((beforePx * 0.75).toFixed(1)), afterPt: Number((afterPx * 0.75).toFixed(1)) }
 }
-function headingLineHeight(level: number) { return level <= 1 ? 1.2 : DOCX_LINE_HEIGHT }
-function headingGap(level: number) {
+export function headingLineHeight(level: number) { return level <= 1 ? 1.2 : DOCX_LINE_HEIGHT }
+export function headingGap(level: number) {
   if (level <= 1) return { before: 96, after: 312 } // .2em / .65em of 24pt
   if (level === 2) return { before: 144, after: 216 } // .4em / .6em of 18pt
   if (level === 3) return { before: 140, after: 112 } // .5em / .4em of 14pt
@@ -726,7 +726,7 @@ function pageBreakHeightToPage(articleTop: number, pitch: number, topMargin: num
 // break between them disappears they must be joined again: the container's 1em
 // bottom margin would otherwise be rendered (and exported as `after: 240`) in
 // the middle of the list. A deliberate numbering restart keeps them apart.
-function isListContinuation(previous: { type: string; start: number; count: number }, node: { type: string; start: number; firstItemContinues: boolean }): boolean {
+export function isListContinuation(previous: { type: string; start: number; count: number }, node: { type: string; start: number; firstItemContinues: boolean }): boolean {
   if (node.type === 'bulletList') return true
   if (node.type !== 'orderedList') return false
   // A split in the middle of an item repeats that item's number, so the
@@ -1275,6 +1275,15 @@ const DocumentImage = Image.extend({
   addNodeView() { return ReactNodeViewRenderer(EditableImageView) },
 })
 
+// The editor schema is shared by the app and the tests. Keeping the list in a
+// factory avoids reusing extension instances across editor instances.
+export function createWordpadExtensions() {
+  return [StarterKit, Underline, TextStyle, FontSize, FontFamily, PaginationContinuation, ListItemPaginationContinuation, ParagraphLayout, TableAppearance, Color, Highlight.configure({ multicolor: true }),
+    TextAlign.configure({ types: ['heading', 'paragraph'] }), DocumentImage.configure({ inline: false, allowBase64: true }), PageBreak,
+    Link.configure({ openOnClick: false, autolink: true, protocols: ['mailto', 'tel'] }), Table.configure({ resizable: true }),
+    TableRow, TableHeader, TableCell, Subscript, Superscript]
+}
+
 function compressImage(file: File): Promise<{ src: string; width: number; height: number }> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file)
@@ -1340,10 +1349,7 @@ export default function App() {
   const paintedFormatLocked = useRef(false)
   const paintedSourceRange = useRef<{ from: number; to: number } | null>(null)
   const editor = useEditor({
-    extensions: [StarterKit, Underline, TextStyle, FontSize, FontFamily, PaginationContinuation, ListItemPaginationContinuation, ParagraphLayout, TableAppearance, Color, Highlight.configure({ multicolor: true }),
-      TextAlign.configure({ types: ['heading', 'paragraph'] }), DocumentImage.configure({ inline: false, allowBase64: true }), PageBreak,
-      Link.configure({ openOnClick: false, autolink: true, protocols: ['mailto', 'tel'] }), Table.configure({ resizable: true }),
-      TableRow, TableHeader, TableCell, Subscript, Superscript],
+    extensions: createWordpadExtensions(),
     content: STARTER, editorProps: {
       attributes: { class: 'document-editor', spellcheck: 'true' },
       transformPastedHTML: inlinePastedStyles,

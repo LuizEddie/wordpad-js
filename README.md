@@ -34,6 +34,17 @@ npm run preview
 
 Publique o conteúdo de `dist/` em um host estático com HTTPS para habilitar instalação e operação offline. Service workers não funcionam em `file://`; para desenvolvimento local use o servidor Vite.
 
+## Testes automatizados
+
+```bash
+npm test          # executa a suíte uma vez
+npm run test:watch
+```
+
+A suíte usa Vitest com jsdom e Testing Library. Os testes de unidade cobrem o pincel de formatação, os helpers de conversão de unidades/estilos e o importador DOCX (OOXML montado em memória com JSZip). Os testes de integração montam o `<App />`, exercitam a faixa de ferramentas, a aplicação do pincel por mouse/teclado e o salvamento automático no `localStorage`.
+
+Os testes validam o modelo ProseMirror e o comportamento da interface, não a geometria real do navegador: jsdom não faz layout, então paginação visual, réguas, fidelidade de impressão e renderização final de arquivos DOCX/PDF continuam exigindo validação manual no navegador.
+
 ## Guia de uso
 
 1. Digite no papel central. As alterações são gravadas automaticamente no armazenamento local após uma breve pausa; o indicador no topo informa o estado. O botão **Salvar** abre as opções de exportação.
@@ -63,4 +74,4 @@ O conteúdo editado permanece no armazenamento local do navegador e não é sinc
 
 ## Tecnologias
 
-React, TypeScript, Vite, Tailwind CSS, TipTap, Mammoth, JSZip, docx, FileSaver e vite-plugin-pwa.
+React, TypeScript, Vite, Tailwind CSS, TipTap, Mammoth, JSZip, docx, FileSaver, vite-plugin-pwa, Vitest, jsdom e Testing Library.
