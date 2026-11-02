@@ -83,3 +83,6 @@
 .font-size-menu-item svg{color:#185abd;flex:none}
 .font-size-menu small{display:block;font-size:10px;line-height:1.4;color:#7b8590;padding:4px 9px 5px}
 @media(max-width:560px){.font-size-input{width:54px}}
+
+/* Paint format: show the armed brush over the whole editable area. */
+.document-editor.paint-format-active,.document-editor.paint-format-active *{cursor:copy!important}

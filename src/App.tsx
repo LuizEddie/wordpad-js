@@ -26,7 +26,7 @@ import {
   ClipboardPaste, Code2, Copy, FilePlus2, FileText, Highlighter, ImagePlus, Italic, Link2,
   List, ListOrdered, Menu, Minus, Plus, Quote, Redo2, Save, Strikethrough,
   Table2, Underline as UnderlineIcon, Undo2, Upload, X, Superscript as SuperscriptIcon,
-  Scissors, Subscript as SubscriptIcon, Type, Pilcrow, RemoveFormatting, FilePlus2 as PagePlus, Trash2,
+  Scissors, Subscript as SubscriptIcon, Type, Pilcrow, RemoveFormatting, FilePlus2 as PagePlus, Trash2, PaintRoller,
 } from 'lucide-react'
 
 type Margins = { left: number; right: number; top: number; bottom: number }
@@ -270,6 +270,131 @@ function resolveLinkUrl(href: string | null | undefined): string | undefined {
     const url = new URL(candidate)
     return LINK_PROTOCOLS.has(url.protocol) ? url.href : undefined
   } catch { return undefined }
+}
+
+// Paint format ("copiar formatação") mirrors Google Docs: it captures the
+// marks and the paragraph style at the cursor (or at the first character of the
+// selection) and applies them to the next text the user selects. Links and
+// list membership belong to the content, not to the visual formatting, so they
+// are neither copied nor removed from the target.
+const PAINTED_MARK_NAMES = ['bold', 'italic', 'underline', 'strike', 'superscript', 'subscript', 'code', 'textStyle', 'highlight'] as const
+type PaintedMark = { type: string; attrs?: Record<string, unknown> }
+type PaintedBlock = { type: 'paragraph' | 'heading'; level: number; textAlign: string | null; docxLayout: string | null }
+type PaintedFormat = { marks: PaintedMark[]; blockMarks: PaintedMark[]; block: PaintedBlock }
+type PaintedApplyResult = 'applied' | 'no-selection' | 'no-change'
+
+function capturePaintedFormat(editor: Editor): PaintedFormat {
+  const { state } = editor
+  const { from, to, empty, $from } = state.selection
+  let marks = $from.marks()
+  // A range can start inside a styled run; the first text node is the source,
+  // as in Google Docs.
+  if (!empty) {
+    state.doc.nodesBetween(from, to, node => {
+      if (!node.isText) return true
+      marks = node.marks
+      return false
+    })
+  }
+  let block: PaintedBlock = { type: 'paragraph', level: 1, textAlign: null, docxLayout: null }
+  for (let depth = $from.depth; depth > 0; depth--) {
+    const node = $from.node(depth)
+    if (node.type.name !== 'paragraph' && node.type.name !== 'heading') continue
+    block = {
+      type: node.type.name === 'heading' ? 'heading' : 'paragraph',
+      level: Math.min(6, Math.max(1, Math.round(Number(node.attrs.level) || 1))),
+      textAlign: typeof node.attrs.textAlign === 'string' ? node.attrs.textAlign : null,
+      docxLayout: typeof node.attrs.docxLayout === 'string' ? node.attrs.docxLayout : null,
+    }
+    break
+  }
+  // Headings are painted by CSS (bold + the h1-h6 size), so they usually carry
+  // no explicit marks. Materializing that visual style lets a partial selection
+  // receive the character formatting the user sees in the source.
+  const blockMarks: PaintedMark[] = []
+  if (block.type === 'heading') {
+    if (!marks.some(mark => mark.type.name === 'bold')) blockMarks.push({ type: 'bold' })
+    const explicitSize = marks.some(mark => mark.type.name === 'textStyle' && mark.attrs.fontSize)
+    if (!explicitSize) blockMarks.push({ type: 'textStyle', attrs: { fontSize: `${headingSizePt(block.level)}pt` } })
+  }
+  return {
+    marks: marks.filter(mark => mark.type.name !== 'link').map(mark => ({ type: mark.type.name, attrs: { ...mark.attrs } })),
+    blockMarks,
+    block,
+  }
+}
+
+// Merges the source's explicit marks with the block's implicit ones without
+// losing textStyle attributes (font family/color captured from the text win).
+function mergePaintedMarks(base: PaintedMark[], extra: PaintedMark[]): PaintedMark[] {
+  const merged: PaintedMark[] = base.map(mark => ({ type: mark.type, attrs: mark.attrs ? { ...mark.attrs } : undefined }))
+  for (const item of extra) {
+    if (item.type === 'textStyle') {
+      const existing = merged.find(mark => mark.type === 'textStyle')
+      if (existing) existing.attrs = { ...item.attrs, ...existing.attrs }
+      else merged.push({ type: item.type, attrs: { ...item.attrs } })
+    } else if (!merged.some(mark => mark.type === item.type)) {
+      merged.push(item)
+    }
+  }
+  return merged
+}
+
+function applyPaintedFormat(editor: Editor, format: PaintedFormat): PaintedApplyResult {
+  const { state } = editor
+  const { from, to, empty } = state.selection
+  // The brush changes only what is selected. A collapsed cursor has nothing to
+  // format, so the brush stays armed until the user selects a range.
+  if (empty) return 'no-selection'
+  // Paragraph-level attributes (heading level, alignment and spacing) only make
+  // sense when the whole block is selected. A partial selection receives just
+  // the character formatting, so the rest of the paragraph keeps its own style.
+  const blockPositions: number[] = []
+  state.doc.nodesBetween(from, to, (node, pos) => {
+    if (node.type.name !== 'paragraph' && node.type.name !== 'heading') return
+    if (from <= pos + 1 && to >= pos + node.nodeSize - 1) blockPositions.push(pos)
+  })
+  const marks = blockPositions.length ? format.marks : mergePaintedMarks(format.marks, format.blockMarks)
+  let targetHasMarks = false
+  state.doc.nodesBetween(from, to, node => {
+    if (node.isText && node.marks.some(mark => (PAINTED_MARK_NAMES as readonly string[]).includes(mark.type.name))) {
+      targetHasMarks = true
+      return false
+    }
+  })
+  // Copying from plain text still clears the target's marks, so only skip when
+  // there is nothing to add, remove or restyle.
+  if (!marks.length && !targetHasMarks && !blockPositions.length) return 'no-change'
+  const tr = state.tr
+  for (const name of PAINTED_MARK_NAMES) {
+    const mark = state.schema.marks[name]
+    if (mark) tr.removeMark(from, to, mark)
+  }
+  for (const copied of marks) {
+    const mark = state.schema.marks[copied.type]
+    if (mark) tr.addMark(from, to, mark.create(copied.attrs))
+  }
+  const blockType = format.block.type === 'heading' ? state.schema.nodes.heading : state.schema.nodes.paragraph
+  for (const position of blockPositions) {
+    const node = tr.doc.nodeAt(position)
+    if (!node || !blockType) continue
+    // The first paragraph of a list item must stay a paragraph, otherwise the
+    // document would break the listItem schema. Inside lists only the spacing
+    // and alignment are copied.
+    let insideListItem = false
+    const $target = tr.doc.resolve(position)
+    for (let depth = $target.depth; depth > 0; depth--) {
+      if ($target.node(depth).type.name === 'listItem') { insideListItem = true; break }
+    }
+    tr.setNodeMarkup(position, insideListItem ? node.type : blockType, {
+      ...node.attrs,
+      ...(insideListItem || format.block.type !== 'heading' ? {} : { level: format.block.level }),
+      textAlign: format.block.textAlign,
+      docxLayout: format.block.docxLayout,
+    })
+  }
+  editor.view.dispatch(tr)
+  return 'applied'
 }
 
 // The docxLayout attribute stores the paragraph spacing as a small CSS
@@ -1193,6 +1318,9 @@ export default function App() {
   const [fontSizeMenuPosition, setFontSizeMenuPosition] = useState({ top: 0, left: 0 })
   // null while the field is not being edited, so it keeps mirroring the caret.
   const [fontSizeDraft, setFontSizeDraft] = useState<string | null>(null)
+  // Non-null while the paint format brush is armed; the captured format is also
+  // mirrored in a ref so DOM event handlers always read the current value.
+  const [paintedFormat, setPaintedFormat] = useState<PaintedFormat | null>(null)
   const [tab, setTab] = useState<'home' | 'insert' | 'layout'>('home')
   const [margins, setMargins] = useState<Margins>({ left: 1, right: 1, top: 1, bottom: 1 })
   const fileInput = useRef<HTMLInputElement>(null)
@@ -1208,6 +1336,9 @@ export default function App() {
   const sidebarRef = useRef<HTMLElement>(null)
   const sidebarToggleRef = useRef<HTMLButtonElement>(null)
   const paginationInProgress = useRef(false)
+  const paintedFormatRef = useRef<PaintedFormat | null>(null)
+  const paintedFormatLocked = useRef(false)
+  const paintedSourceRange = useRef<{ from: number; to: number } | null>(null)
   const editor = useEditor({
     extensions: [StarterKit, Underline, TextStyle, FontSize, FontFamily, PaginationContinuation, ListItemPaginationContinuation, ParagraphLayout, TableAppearance, Color, Highlight.configure({ multicolor: true }),
       TextAlign.configure({ types: ['heading', 'paragraph'] }), DocumentImage.configure({ inline: false, allowBase64: true }), PageBreak,
@@ -1242,6 +1373,9 @@ export default function App() {
       // A plain click on a link follows it. Modifier clicks keep the default
       // editing behavior so the text can still be selected/edited.
       handleClick: (_view, _pos, event) => {
+        // With the paint brush armed, a click on a link must select the text
+        // instead of opening the URL.
+        if (paintedFormatRef.current) return false
         if (event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false
         const anchor = (event.target as HTMLElement | null)?.closest?.('a[href]')
         const url = anchor ? resolveLinkUrl(anchor.getAttribute('href')) : undefined
@@ -1416,6 +1550,119 @@ export default function App() {
     editor.chain().focus().updateAttributes('image', { width: Math.round(newWidth), height: Math.round(oldHeight * newWidth / oldWidth) }).run()
   }
   const applyFontColor = (color: string) => { setFontColor(color); editor?.chain().focus().setColor(color).run(); setFontPaletteOpen(false) }
+  const stopPaintFormat = useCallback(() => {
+    paintedFormatRef.current = null
+    paintedFormatLocked.current = false
+    paintedSourceRange.current = null
+    setPaintedFormat(null)
+  }, [])
+  const startPaintFormat = (locked: boolean) => {
+    if (!editor) return
+    const captured = capturePaintedFormat(editor)
+    paintedFormatRef.current = captured
+    paintedFormatLocked.current = locked
+    paintedSourceRange.current = { from: editor.state.selection.from, to: editor.state.selection.to }
+    setPaintedFormat(captured)
+    setStatus(locked ? 'Formatação copiada e fixa. Selecione os destinos ou pressione Esc.' : 'Formatação copiada. Selecione o texto de destino.')
+    editor.commands.focus()
+  }
+  // A single click arms the brush for one use; a double click keeps it armed
+  // for several targets (as in Google Docs). The format is captured right away
+  // so a fast click into the document cannot replace the source selection; the
+  // second click of a double click re-arms it as sticky.
+  const paintFormatClick = () => {
+    if (paintedFormatRef.current) stopPaintFormat()
+    else startPaintFormat(false)
+  }
+  const paintFormatDoubleClick = () => {
+    if (paintedFormatRef.current && paintedFormatLocked.current) stopPaintFormat()
+    else startPaintFormat(true)
+  }
+  useEffect(() => {
+    if (!paintedFormat) return
+    const cancelOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') stopPaintFormat() }
+    window.addEventListener('keydown', cancelOnEscape)
+    return () => window.removeEventListener('keydown', cancelOnEscape)
+  }, [paintedFormat, stopPaintFormat])
+  // Apply on mouseup/keyup, after ProseMirror has settled the new selection.
+  // The press must start inside the editable area so toolbar/menu clicks never
+  // consume the brush. A drag that ends outside the sheet still applies, and a
+  // keyboard selection applies when the selection is non-empty.
+  useEffect(() => {
+    if (!editor || !paintedFormat) return
+    let pressedInside = false
+    let frame = 0
+    let timer = 0
+    const applyOnSelection = () => {
+      frame = 0
+      timer = 0
+      const format = paintedFormatRef.current
+      if (!format) return
+      const { selection } = editor.state
+      // Keep the brush armed when the user has not selected anything new yet
+      // (for example, only pressed Shift to start extending the selection).
+      const source = paintedSourceRange.current
+      if (source && source.from === selection.from && source.to === selection.to) return
+      const result = applyPaintedFormat(editor, format)
+      if (result === 'no-selection') return
+      if (result === 'no-change') {
+        // The copied format only carries paragraph attributes (alignment,
+        // spacing), which cannot be applied to part of a paragraph. Keep the
+        // brush armed and explain why nothing changed.
+        setStatus('Nada a aplicar neste trecho. Para alinhamento e espaçamento, selecione o parágrafo inteiro.')
+        return
+      }
+      paintedSourceRange.current = { from: selection.from, to: selection.to }
+      if (!paintedFormatLocked.current) stopPaintFormat()
+      else setStatus('Formatação aplicada. Selecione outro destino ou pressione Esc.')
+    }
+    // Mouse selections are settled on mouseup, so the next frame is enough.
+    // Keyboard selections arrive as a burst of keyups (Shift+arrows); the short
+    // delay waits for the user to finish extending before applying.
+    const scheduleApply = (delay = 0) => {
+      if (frame) { window.cancelAnimationFrame(frame); frame = 0 }
+      if (timer) { window.clearTimeout(timer); timer = 0 }
+      if (delay) timer = window.setTimeout(applyOnSelection, delay)
+      else frame = window.requestAnimationFrame(applyOnSelection)
+    }
+    const onMouseDown = (event: MouseEvent) => {
+      pressedInside = event.button === 0 && event.target instanceof globalThis.Node && editor.view.dom.contains(event.target)
+    }
+    const onMouseUp = (event: MouseEvent) => {
+      if (!pressedInside || event.button !== 0) return
+      pressedInside = false
+      scheduleApply()
+    }
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') return
+      if (!(event.target instanceof globalThis.Node) || !editor.view.dom.contains(event.target)) return
+      // Only selection gestures count: Shift+navigation (including releasing
+      // Shift) and Ctrl/Cmd+A. Other shortcuts (undo, bold, etc.) must keep
+      // working while the brush is armed.
+      const extendsSelection = event.key === 'Shift' || event.key.startsWith('Arrow') ||
+        ['Home', 'End', 'PageUp', 'PageDown'].includes(event.key) ||
+        ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a')
+      if (!extendsSelection || editor.state.selection.empty) return
+      scheduleApply(300)
+    }
+    document.addEventListener('mousedown', onMouseDown, true)
+    document.addEventListener('mouseup', onMouseUp, true)
+    document.addEventListener('keyup', onKeyUp, true)
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame)
+      if (timer) window.clearTimeout(timer)
+      document.removeEventListener('mousedown', onMouseDown, true)
+      document.removeEventListener('mouseup', onMouseUp, true)
+      document.removeEventListener('keyup', onKeyUp, true)
+    }
+  }, [editor, paintedFormat, stopPaintFormat])
+  // The brush cursor makes the armed state visible over the whole sheet.
+  useEffect(() => {
+    if (!editor) return
+    const dom = editor.view.dom
+    dom.classList.toggle('paint-format-active', Boolean(paintedFormat))
+    return () => dom.classList.remove('paint-format-active')
+  }, [editor, paintedFormat])
   const popupPosition = (element: HTMLElement | null, width: number) => {
     const rect = element?.getBoundingClientRect()
     return rect ? { top: rect.bottom + 6, left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)) } : { top: 150, left: 12 }
@@ -1711,7 +1958,7 @@ export default function App() {
       </div>}
     </div><i />
     <div className="group"><Tool label="Negrito" active={editor.isActive('bold')} action={() => editor.chain().focus().toggleBold().run()}><Bold /></Tool><Tool label="Itálico" active={editor.isActive('italic')} action={() => editor.chain().focus().toggleItalic().run()}><Italic /></Tool><Tool label="Sublinhado" active={editor.isActive('underline')} action={() => editor.chain().focus().toggleUnderline().run()}><UnderlineIcon /></Tool><Tool label="Tachado" active={editor.isActive('strike')} action={() => editor.chain().focus().toggleStrike().run()}><Strikethrough /></Tool><Tool label="Sobrescrito" active={editor.isActive('superscript')} action={() => editor.chain().focus().toggleSuperscript().run()}><SuperscriptIcon /></Tool><Tool label="Subscrito" active={editor.isActive('subscript')} action={() => editor.chain().focus().toggleSubscript().run()}><SubscriptIcon /></Tool></div><i />
-    <div className="color-picker"><button ref={fontColorButton} type="button" className="color-tool font-color-button" title="Aplicar cor da fonte" aria-label="Aplicar cor da fonte" onClick={() => applyFontColor(fontColor)}><Type /><span style={{ backgroundColor: fontColor }} /></button><button type="button" className="color-caret" title="Escolher cor da fonte" aria-label="Escolher cor da fonte" onClick={() => { setColorMenuPosition(popupPosition(fontColorButton.current, 210)); setFontPaletteOpen(open => !open) }}><ChevronDown size={13} /></button>{fontPaletteOpen && <div className="color-menu" style={colorMenuPosition}><strong>Cor da fonte</strong><div className="color-swatches">{FONT_COLORS.map(color => <button key={color} type="button" title={color} aria-label={`Cor ${color}`} style={{ backgroundColor: color }} onClick={() => applyFontColor(color)} />)}</div><label>Personalizada<input type="color" value={fontColor} onChange={e => { setFontColor(e.target.value); editor.chain().focus().setColor(e.target.value).run() }} /></label></div>}</div><label className="color-tool" title="Realce"><Highlighter /><input type="color" aria-label="Cor do realce" defaultValue="#fff176" onChange={e => editor.chain().focus().toggleHighlight({ color: e.target.value }).run()} /></label><Tool label="Remover formatação" action={() => editor.chain().focus().unsetAllMarks().clearNodes().run()}><RemoveFormatting /></Tool><i />
+    <div className="color-picker"><button ref={fontColorButton} type="button" className="color-tool font-color-button" title="Aplicar cor da fonte" aria-label="Aplicar cor da fonte" onClick={() => applyFontColor(fontColor)}><Type /><span style={{ backgroundColor: fontColor }} /></button><button type="button" className="color-caret" title="Escolher cor da fonte" aria-label="Escolher cor da fonte" onClick={() => { setColorMenuPosition(popupPosition(fontColorButton.current, 210)); setFontPaletteOpen(open => !open) }}><ChevronDown size={13} /></button>{fontPaletteOpen && <div className="color-menu" style={colorMenuPosition}><strong>Cor da fonte</strong><div className="color-swatches">{FONT_COLORS.map(color => <button key={color} type="button" title={color} aria-label={`Cor ${color}`} style={{ backgroundColor: color }} onClick={() => applyFontColor(color)} />)}</div><label>Personalizada<input type="color" value={fontColor} onChange={e => { setFontColor(e.target.value); editor.chain().focus().setColor(e.target.value).run() }} /></label></div>}</div><label className="color-tool" title="Realce"><Highlighter /><input type="color" aria-label="Cor do realce" defaultValue="#fff176" onChange={e => editor.chain().focus().toggleHighlight({ color: e.target.value }).run()} /></label><button type="button" title="Copiar formatação · clique duas vezes para manter ativo" aria-label="Copiar formatação" aria-pressed={Boolean(paintedFormat)} className={`tool ${paintedFormat ? 'active' : ''}`} onClick={paintFormatClick} onDoubleClick={paintFormatDoubleClick}><PaintRoller /></button><Tool label="Remover formatação" action={() => editor.chain().focus().unsetAllMarks().clearNodes().run()}><RemoveFormatting /></Tool><i />
     <div className="group"><Tool label="Alinhar à esquerda" active={editor.isActive({ textAlign: 'left' })} action={() => editor.chain().focus().setTextAlign('left').run()}><AlignLeft /></Tool><Tool label="Centralizar" active={editor.isActive({ textAlign: 'center' })} action={() => editor.chain().focus().setTextAlign('center').run()}><AlignCenter /></Tool><Tool label="Alinhar à direita" active={editor.isActive({ textAlign: 'right' })} action={() => editor.chain().focus().setTextAlign('right').run()}><AlignRight /></Tool><Tool label="Justificar" active={editor.isActive({ textAlign: 'justify' })} action={() => editor.chain().focus().setTextAlign('justify').run()}><AlignJustify /></Tool></div><i />
     <div className="spacing-picker">
       <button ref={spacingButton} type="button" className={`tool ${spacingMenuOpen ? 'active' : ''}`} title="Espaçamento entre linhas e parágrafos" aria-label="Espaçamento entre linhas e parágrafos" aria-haspopup="menu" aria-expanded={spacingMenuOpen} onClick={() => { setSpacingMenuPosition(popupPosition(spacingButton.current, 268)); setSpacingMenuOpen(open => !open) }}><AlignVerticalSpaceAround /></button>
@@ -1837,6 +2084,7 @@ export default function App() {
       <ContextItem label="Sublinhado" icon={<UnderlineIcon />} action={() => editor.chain().focus().toggleUnderline().run()} active={editor.isActive('underline')} />
       <ContextItem label="Tachado" icon={<Strikethrough />} action={() => editor.chain().focus().toggleStrike().run()} active={editor.isActive('strike')} />
       <label className="context-color-row">Cor da fonte<input aria-label="Escolher cor da fonte" type="color" value={fontColor} onChange={event => applyFontColor(event.target.value)} /></label>
+      <ContextItem label="Copiar formatação" icon={<PaintRoller />} action={() => startPaintFormat(false)} active={Boolean(paintedFormat)} />
       <ContextItem label="Remover formatação" icon={<RemoveFormatting />} action={() => editor.chain().focus().unsetAllMarks().clearNodes().run()} />
       <div className="context-menu-separator" />
       <ContextItem label="Texto normal" icon={<Type />} action={() => editor.chain().focus().setParagraph().run()} active={editor.isActive('paragraph')} />
